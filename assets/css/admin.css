@@ -1,0 +1,133 @@
+.mds-imagegrid-wrap {
+    max-width: 1180px;
+}
+
+.mds-imagegrid-lede {
+    max-width: 760px;
+    color: #50575e;
+    font-size: 14px;
+}
+
+.mds-imagegrid-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    gap: 16px;
+    margin-top: 18px;
+}
+
+.mds-imagegrid-panel {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 6px;
+    padding: 18px;
+}
+
+.mds-imagegrid-panel h2 {
+    margin: 0 0 12px;
+    font-size: 17px;
+}
+
+.mds-imagegrid-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.mds-imagegrid-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    border-radius: 999px;
+    padding: 0 10px;
+    background: #f0f6fc;
+    color: #1d4f8f;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.mds-imagegrid-status-connected,
+.mds-imagegrid-status-succeeded {
+    background: #edfaef;
+    color: #0a6b2b;
+}
+
+.mds-imagegrid-status-failed,
+.mds-imagegrid-status-not_connected {
+    background: #fcf0f1;
+    color: #8a2424;
+}
+
+.mds-imagegrid-inline-control {
+    display: inline-block;
+    margin-left: 12px;
+}
+
+.mds-imagegrid-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.mds-imagegrid-facts {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+}
+
+.mds-imagegrid-facts div {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.mds-imagegrid-facts dt {
+    color: #646970;
+    font-weight: 600;
+}
+
+.mds-imagegrid-facts dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.mds-imagegrid-grid-panel {
+    margin-top: 16px;
+}
+
+.mds-imagegrid-grid-select {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.mds-imagegrid-grid-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.mds-imagegrid-grid-state {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mds-imagegrid-error {
+    margin: 14px 0 0;
+    color: #8a2424;
+}
+
+@media (max-width: 900px) {
+    .mds-imagegrid-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .mds-imagegrid-grid-state {
+        grid-template-columns: 1fr;
+    }
+}
