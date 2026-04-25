@@ -2,10 +2,10 @@
 Contributors: milliondollarscript
 Requires at least: 6.0
 Requires PHP: 8.1
-Stable tag: 1.0.0
-License: Commercial
+Stable tag: 1.0.1
+License: GPL-3.0+
 
-Connects Million Dollar Script grids to ImageGrid for hosted rendering and authenticated tile delivery.
+Free connector that connects Million Dollar Script grids to ImageGrid for hosted rendering and authenticated tile delivery.
 
 == Description ==
 
@@ -23,4 +23,3 @@ MDS ImageGrid connects MDS3 zoomable grids to the separately subscribed ImageGri
 
 = 1.0.0 =
 Initial unreleased build for manual testing.
-

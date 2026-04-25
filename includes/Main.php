@@ -97,7 +97,7 @@ class Main {
 
         $state = self::get_grid_state($grid_id);
 
-        return !empty($state['tileset_id']) && 'succeeded' === ($state['status'] ?? '');
+        return !empty($state['tileset_id']) && 'ready' === ($state['status'] ?? '');
     }
 
     /**
@@ -118,7 +118,7 @@ class Main {
         $state = self::get_grid_state($grid_id);
         $tileset_id = $state['tileset_id'] ?? '';
 
-        if (!$tileset_id || 'succeeded' !== ($state['status'] ?? '')) {
+        if (!$tileset_id || 'ready' !== ($state['status'] ?? '')) {
             return $request;
         }
 
@@ -158,7 +158,7 @@ class Main {
         }
 
         $existing = self::get_grid_state($grid_id);
-        if (!empty($existing['job_id']) && in_array($existing['status'] ?? '', ['queued', 'running'], true)) {
+        if (!empty($existing['job_id']) && in_array($existing['status'] ?? '', ['queued', 'running', 'pending', 'rendering'], true)) {
             return [
                 'status' => 'remote_in_progress',
                 'job_id' => $existing['job_id'],
@@ -202,7 +202,37 @@ class Main {
             return new \WP_Error('mds_imagegrid_grid_not_found', __('Grid not found.', 'mds-imagegrid'));
         }
 
-        $response = self::instance()->client()->create_grid_render_job($grid);
+        $client = self::instance()->client();
+        $preflight = $client->preflight_grid_render($grid);
+
+        if (is_wp_error($preflight)) {
+            self::update_grid_state($grid_id, [
+                'status'     => 'failed',
+                'last_error' => $preflight->get_error_message(),
+                'updated_at' => current_time('mysql'),
+            ]);
+
+            return $preflight;
+        }
+
+        if (isset($preflight['ok']) && !$preflight['ok']) {
+            $failing_key = sanitize_key((string) ($preflight['failing_key'] ?? 'quota'));
+            $message = sprintf(
+                __('ImageGrid quota preflight failed for %s.', 'mds-imagegrid'),
+                $failing_key
+            );
+
+            self::update_grid_state($grid_id, [
+                'status'     => 'failed',
+                'preflight'  => $preflight,
+                'last_error' => $message,
+                'updated_at' => current_time('mysql'),
+            ]);
+
+            return new \WP_Error('mds_imagegrid_preflight_failed', $message, $preflight);
+        }
+
+        $response = $client->create_grid_render_job($grid);
 
         if (is_wp_error($response)) {
             return $response;
@@ -210,10 +240,11 @@ class Main {
 
         self::update_grid_state($grid_id, [
             'job_id'     => $response['id'] ?? '',
-            'status'     => $response['status'] ?? 'queued',
-            'operation'  => $response['operation'] ?? 'grid_render',
+            'status'     => self::normalize_job_status($response['status'] ?? 'pending'),
+            'operation'  => $response['operation'] ?? 'mds_grid_composition',
             'tileset_id' => '',
             'format'     => 'png',
+            'preflight'  => $preflight,
             'submitted_at' => current_time('mysql'),
             'updated_at' => current_time('mysql'),
             'last_error' => '',
@@ -252,7 +283,7 @@ class Main {
 
         self::update_grid_state($grid_id, [
             'job_id'     => $response['id'] ?? $job_id,
-            'status'     => $response['status'] ?? ($state['status'] ?? ''),
+            'status'     => self::normalize_job_status($response['status'] ?? ($state['status'] ?? '')),
             'tileset_id' => $result['tileset_id'] ?? ($state['tileset_id'] ?? ''),
             'format'     => $result['format'] ?? ($state['format'] ?? 'png'),
             'tile_size'  => $result['tile_size'] ?? ($state['tile_size'] ?? 256),
@@ -319,5 +350,33 @@ class Main {
      */
     private static function grid_state_option_name($grid_id) {
         return 'mds_imagegrid_grid_' . absint($grid_id);
+    }
+
+    /**
+     * Normalize ImageGrid statuses to MDS-facing job states.
+     *
+     * @param string $status Remote status.
+     * @return string
+     */
+    private static function normalize_job_status($status) {
+        $status = sanitize_key((string) $status);
+
+        if (in_array($status, ['queued', 'pending'], true)) {
+            return 'pending';
+        }
+
+        if (in_array($status, ['running', 'processing', 'rendering'], true)) {
+            return 'rendering';
+        }
+
+        if (in_array($status, ['succeeded', 'complete', 'completed', 'ready'], true)) {
+            return 'ready';
+        }
+
+        if (in_array($status, ['failed', 'error'], true)) {
+            return 'failed';
+        }
+
+        return $status ?: 'pending';
     }
 }

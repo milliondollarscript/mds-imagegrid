@@ -7,6 +7,9 @@
 
 namespace MDS\Extensions\ImageGrid;
 
+use MDS\Media\OriginalAttachmentResolver;
+use MDS\Rendering\RenderEstimate;
+
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -78,16 +81,36 @@ class API_Client {
     }
 
     /**
-     * Create a grid_render job.
+     * Preflight a grid composition render.
+     *
+     * @param \MDS\Core\Grid $grid    Grid object.
+     * @param array          $options Additional ImageGrid options.
+     * @return array|\WP_Error
+     */
+    public function preflight_grid_render($grid, array $options = []) {
+        $render_options = $this->build_grid_render_options($grid, $options);
+        $payload = [
+            'operation' => 'mds_grid_composition',
+            'options'   => $render_options,
+            'estimate'  => $this->estimate_grid_render($grid, $render_options),
+        ];
+
+        return $this->request_json('POST', '/v1/renders/preflight', $payload);
+    }
+
+    /**
+     * Create a grid composition render job.
      *
      * @param \MDS\Core\Grid $grid    Grid object.
      * @param array          $options Additional ImageGrid options.
      * @return array|\WP_Error
      */
     public function create_grid_render_job($grid, array $options = []) {
+        $render_options = $this->build_grid_render_options($grid, $options);
         $payload = [
-            'operation' => 'grid_render',
-            'options'   => $this->build_grid_render_options($grid, $options),
+            'operation' => 'mds_grid_composition',
+            'options'   => $render_options,
+            'estimate'  => $this->estimate_grid_render($grid, $render_options),
         ];
 
         return $this->request_json('POST', '/v1/jobs', $payload);
@@ -232,7 +255,7 @@ class API_Client {
     }
 
     /**
-     * Build grid_render options from an MDS grid.
+     * Build grid composition render options from an MDS grid.
      *
      * @param \MDS\Core\Grid $grid    Grid object.
      * @param array          $options Additional options.
@@ -262,7 +285,9 @@ class API_Client {
             'show_grid_lines'  => (bool) $show_lines,
             'tile_size'        => max(64, absint(get_option('mds_grid_tile_size', 256))),
             'format'           => 'png',
-            'strategy'         => 'deepzoom',
+            'strategy'         => 'base_grid_plus_original_detail_tiles',
+            'manifest_version' => 'mds-grid-composition-v1',
+            'placements'       => $this->build_grid_placements($grid_id),
         ];
 
         $max_zoom = absint(get_option('mds_max_zoom_level', 5));
@@ -271,6 +296,112 @@ class API_Client {
         $default_options['max_level'] = max($min_zoom, $max_zoom);
 
         return array_merge($default_options, $options);
+    }
+
+    /**
+     * Estimate a render for quota preflight.
+     *
+     * @param \MDS\Core\Grid $grid    Grid object.
+     * @param array          $options Render options.
+     * @return array
+     */
+    private function estimate_grid_render($grid, array $options) {
+        $source_images = [];
+        foreach ($options['placements'] ?? [] as $placement) {
+            if (!empty($placement['source']['width']) && !empty($placement['source']['height'])) {
+                $source_images[] = [
+                    'width' => (int) $placement['source']['width'],
+                    'height' => (int) $placement['source']['height'],
+                ];
+            }
+        }
+
+        if (class_exists(RenderEstimate::class)) {
+            return RenderEstimate::for_grid(
+                [
+                    'width' => max(1, absint($grid->get_width())),
+                    'height' => max(1, absint($grid->get_height())),
+                ],
+                $source_images,
+                (int) ($options['tile_size'] ?? 256),
+                (int) ($options['max_level'] ?? 0)
+            );
+        }
+
+        return [
+            'grid_megapixels' => round((max(1, absint($grid->get_width())) * max(1, absint($grid->get_height()))) / 1000000, 4),
+            'source_megapixels' => 0,
+            'tile_estimate' => 0,
+            'storage_estimate_bytes' => 0,
+            'processing_credits' => 1,
+        ];
+    }
+
+    /**
+     * Build placement manifest entries from the MDS placement table.
+     *
+     * @param int $grid_id Grid ID.
+     * @return array
+     */
+    private function build_grid_placements($grid_id) {
+        global $wpdb;
+
+        $grid_id = absint($grid_id);
+        if (!$grid_id) {
+            return [];
+        }
+
+        $table = $wpdb->prefix . 'mds3_placements';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+            $table = $wpdb->prefix . 'mds_placements';
+            if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+                return [];
+            }
+        }
+
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$table} WHERE grid_id = %d AND status IN ('approved', 'ready', 'sold', 'purchased') ORDER BY sort_order ASC, id ASC",
+            $grid_id
+        ));
+
+        $resolver = class_exists(OriginalAttachmentResolver::class) ? new OriginalAttachmentResolver() : null;
+        $placements = [];
+
+        foreach ($rows as $row) {
+            $source = $resolver ? $resolver->resolve((int) $row->attachment_id) : null;
+
+            $placements[] = [
+                'id' => (int) $row->id,
+                'attachment_id' => (int) $row->attachment_id,
+                'x' => (int) $row->x,
+                'y' => (int) $row->y,
+                'width' => (int) $row->width,
+                'height' => (int) $row->height,
+                'crop' => [
+                    'x' => null === $row->crop_x ? null : (float) $row->crop_x,
+                    'y' => null === $row->crop_y ? null : (float) $row->crop_y,
+                    'width' => null === $row->crop_width ? null : (float) $row->crop_width,
+                    'height' => null === $row->crop_height ? null : (float) $row->crop_height,
+                ],
+                'focal_point' => [
+                    'x' => null === $row->focal_x ? null : (float) $row->focal_x,
+                    'y' => null === $row->focal_y ? null : (float) $row->focal_y,
+                ],
+                'fit_mode' => sanitize_key((string) $row->fit_mode),
+                'link_url' => esc_url_raw((string) $row->link_url),
+                'alt_text' => sanitize_text_field((string) $row->alt_text),
+                'status' => sanitize_key((string) $row->status),
+                'source' => $source ? [
+                    'url' => $source['url'],
+                    'mime_type' => $source['mime_type'],
+                    'width' => $source['width'],
+                    'height' => $source['height'],
+                    'megapixels' => $source['megapixels'],
+                ] : null,
+            ];
+        }
+
+        return $placements;
     }
 
     /**

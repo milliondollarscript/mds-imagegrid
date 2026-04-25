@@ -1,18 +1,20 @@
 # MDS ImageGrid
 
-Premium Million Dollar Script extension for the hosted ImageGrid service.
+Free Million Dollar Script connector for the paid hosted ImageGrid service.
 
 ## Features
 
 - Connects MDS to a separately subscribed ImageGrid workspace with an API key.
-- Submits `grid_render` jobs for MDS zoomable grids.
+- Submits MDS grid-composition render jobs for zoomable grids.
 - Stores remote job and tileset state per grid without changing existing grid records.
 - Proxies authenticated remote tiles through WordPress when a grid has a ready ImageGrid tileset.
 - Keeps local MDS tile generation as the default fallback.
 
 ## Local Development
 
-The extension defaults to `http://localhost:18082` when WordPress reports a `local` or `development` environment. Production environments default to `https://imagegrid.milliondollarscript.com`.
+The server API URL defaults to `http://host.docker.internal:18082` when WordPress reports a `local` or `development` environment. Production environments default to `https://api.imagegrid.dev`.
+
+Browser account and API-key links always point to `https://imagegrid.dev`.
 
 Override the service URL with the `MDS_IMAGEGRID_API_URL` constant or the `mds_imagegrid_default_api_url` filter.
 
@@ -27,7 +29,7 @@ Override the service URL with the `MDS_IMAGEGRID_API_URL` constant or the `mds_i
 Package with:
 
 ```bash
-./scripts/package-extension.sh premium/mds-imagegrid
+./scripts/package-extension.sh free/mds-imagegrid
 ```
 
 ## Release Notes

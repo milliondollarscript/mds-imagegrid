@@ -2,20 +2,20 @@
 /**
  * Plugin Name: MDS ImageGrid
  * Plugin URI: https://milliondollarscript.com/extensions/imagegrid
- * Description: Connects Million Dollar Script grids to the hosted ImageGrid service for remote grid rendering and tile delivery.
- * Version: 1.0.0
+ * Description: Free connector for rendering MDS grids with the paid ImageGrid service.
+ * Version: 1.0.1
  * Author: Million Dollar Script
  * Author URI: https://milliondollarscript.com
  * Text Domain: mds-imagegrid
  * Domain Path: /languages
  * Requires at least: 6.0
  * Requires PHP: 8.1
- * License: Commercial
- * License URI: https://milliondollarscript.com/license
+ * License: GPL-3.0+
+ * License URI: https://www.gnu.org/licenses/gpl-3.0.html
  * Requires Plugins: million-dollar-script
  *
  * Requires MDS: 3.0.0
- * Requires License: Yes
+ * Requires License: No
  *
  * @package MDS\Extensions\ImageGrid
  */
@@ -27,7 +27,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('MDS_IMAGEGRID_VERSION')) {
-    define('MDS_IMAGEGRID_VERSION', '1.0.0');
+    define('MDS_IMAGEGRID_VERSION', '1.0.1');
 }
 
 if (!defined('MDS_IMAGEGRID_FILE')) {
@@ -47,11 +47,10 @@ if (!defined('MDS_IMAGEGRID_BASENAME')) {
 }
 
 /**
- * Resolve the default service URL.
+ * Resolve the default server API URL.
  *
- * Local/development WordPress environments use the local ImageGrid API noted for
- * this workspace. Production can override the URL with MDS_IMAGEGRID_API_URL or
- * the mds_imagegrid_default_api_url filter.
+ * Browser account links are handled separately by mds_imagegrid_app_url() so
+ * Docker/local API URLs never leak into account or API-key links.
  *
  * @return string
  */
@@ -62,10 +61,19 @@ function mds_imagegrid_default_api_url() {
 
     $environment = function_exists('wp_get_environment_type') ? wp_get_environment_type() : 'production';
     $default = in_array($environment, ['local', 'development'], true)
-        ? 'http://localhost:18082'
-        : 'https://imagegrid.milliondollarscript.com';
+        ? 'http://host.docker.internal:18082'
+        : 'https://api.imagegrid.dev';
 
     return untrailingslashit((string) apply_filters('mds_imagegrid_default_api_url', $default));
+}
+
+/**
+ * Resolve the browser-facing ImageGrid app URL.
+ *
+ * @return string
+ */
+function mds_imagegrid_app_url() {
+    return untrailingslashit((string) apply_filters('mds_imagegrid_app_url', 'https://imagegrid.dev'));
 }
 
 /**
@@ -74,7 +82,8 @@ function mds_imagegrid_default_api_url() {
  * @return bool
  */
 function mds_imagegrid_check_mds_active() {
-    return class_exists('\\MDS\\Core\\Plugin') && function_exists('mds_initialize');
+    return (class_exists('\\MDS\\Core\\Plugin') && function_exists('mds_initialize'))
+        || (class_exists('\\MDS3\\Plugin') && defined('MDS3_VERSION'));
 }
 
 /**
@@ -131,14 +140,14 @@ function mds_imagegrid_register_extension() {
     if (class_exists('\\MDS\\Core\\Extensions\\Manager')) {
         \MDS\Core\Extensions\Manager::register([
             'id'               => 'mds-imagegrid',
-            'name'             => __('ImageGrid', 'mds-imagegrid'),
-            'description'      => __('Hosted ImageGrid rendering and tile delivery for MDS zoomable grids.', 'mds-imagegrid'),
+            'name'             => 'ImageGrid',
+            'description'      => 'Free connector for hosted ImageGrid rendering and tile delivery.',
             'version'          => MDS_IMAGEGRID_VERSION,
             'author'           => 'Million Dollar Script',
             'url'              => 'https://milliondollarscript.com/extensions/imagegrid',
             'main_file'        => __FILE__,
-            'premium'          => true,
-            'license_required' => true,
+            'premium'          => false,
+            'license_required' => false,
             'capabilities'     => [
                 'payment_gateway' => false,
                 'admin_pages'     => true,
@@ -197,7 +206,7 @@ function mds_imagegrid_activation_notice() {
     echo '<div class="notice notice-success is-dismissible"><p>';
     echo '<strong>' . esc_html__('MDS ImageGrid', 'mds-imagegrid') . '</strong>: ';
     echo esc_html__('Extension activated. Add your ImageGrid API key to enable remote grid rendering.', 'mds-imagegrid');
-    echo ' <a href="' . esc_url(admin_url('admin.php?page=mds-imagegrid')) . '">' . esc_html__('Settings', 'mds-imagegrid') . '</a>';
+    echo ' <a href="' . esc_url(admin_url('admin.php?page=mds3-settings')) . '">' . esc_html__('Settings', 'mds-imagegrid') . '</a>';
     echo '</p></div>';
 
     delete_transient('mds_imagegrid_activated');

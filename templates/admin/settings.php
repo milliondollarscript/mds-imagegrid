@@ -29,7 +29,7 @@ $connection_status = $last_connection['status'] ?? 'not_connected';
 <div class="wrap mds-imagegrid-wrap">
     <h1 class="wp-heading-inline"><?php esc_html_e('ImageGrid', 'mds-imagegrid'); ?></h1>
     <p class="mds-imagegrid-lede">
-        <?php esc_html_e('Connect MDS zoomable grids to the hosted ImageGrid API for remote rendering and authenticated tile delivery.', 'mds-imagegrid'); ?>
+        <?php esc_html_e('Connect MDS zoomable grids to ImageGrid for remote rendering and authenticated tile delivery.', 'mds-imagegrid'); ?>
     </p>
 
     <?php if ($notice) : ?>
@@ -73,7 +73,8 @@ $connection_status = $last_connection['status'] ?? 'not_connected';
                     <tr>
                         <th scope="row"><label for="mds_imagegrid_api_url"><?php esc_html_e('API URL', 'mds-imagegrid'); ?></label></th>
                         <td>
-                            <input type="url" class="regular-text" id="mds_imagegrid_api_url" name="mds_imagegrid_api_url" value="<?php echo esc_attr($api_url); ?>" placeholder="https://imagegrid.milliondollarscript.com">
+                            <input type="url" class="regular-text" id="mds_imagegrid_api_url" name="mds_imagegrid_api_url" value="<?php echo esc_attr($api_url); ?>" placeholder="https://api.imagegrid.dev">
+                            <p class="description"><?php esc_html_e('Server API URL. This can point at local Docker during development and is never used for browser account links.', 'mds-imagegrid'); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -186,6 +187,10 @@ $connection_status = $last_connection['status'] ?? 'not_connected';
 
             <dl class="mds-imagegrid-facts mds-imagegrid-grid-state">
                 <div>
+                    <dt><?php esc_html_e('State', 'mds-imagegrid'); ?></dt>
+                    <dd><?php echo esc_html($selected_state['status'] ?? __('None', 'mds-imagegrid')); ?></dd>
+                </div>
+                <div>
                     <dt><?php esc_html_e('Job ID', 'mds-imagegrid'); ?></dt>
                     <dd><?php echo esc_html($selected_state['job_id'] ?? __('None', 'mds-imagegrid')); ?></dd>
                 </div>
@@ -196,6 +201,18 @@ $connection_status = $last_connection['status'] ?? 'not_connected';
                 <div>
                     <dt><?php esc_html_e('Tiles', 'mds-imagegrid'); ?></dt>
                     <dd><?php echo esc_html(!empty($selected_state['total_tiles']) ? number_format_i18n((int) $selected_state['total_tiles']) : __('Unknown', 'mds-imagegrid')); ?></dd>
+                </div>
+                <div>
+                    <dt><?php esc_html_e('Preflight', 'mds-imagegrid'); ?></dt>
+                    <dd>
+                        <?php
+                        $preflight = isset($selected_state['preflight']) && is_array($selected_state['preflight']) ? $selected_state['preflight'] : [];
+                        echo esc_html(isset($preflight['ok']) ? ($preflight['ok'] ? __('Passed', 'mds-imagegrid') : __('Failed', 'mds-imagegrid')) : __('Not run', 'mds-imagegrid'));
+                        if (!empty($preflight['failing_key'])) {
+                            echo esc_html(' (' . $preflight['failing_key'] . ')');
+                        }
+                        ?>
+                    </dd>
                 </div>
                 <div>
                     <dt><?php esc_html_e('Updated', 'mds-imagegrid'); ?></dt>
