@@ -73,7 +73,11 @@ function mds_imagegrid_default_api_url() {
  * @return string
  */
 function mds_imagegrid_app_url() {
-    return untrailingslashit((string) apply_filters('mds_imagegrid_app_url', 'https://imagegrid.dev'));
+    $default = defined('MDS_IMAGEGRID_APP_URL') && MDS_IMAGEGRID_APP_URL
+        ? (string) MDS_IMAGEGRID_APP_URL
+        : 'https://imagegrid.dev';
+
+    return untrailingslashit((string) apply_filters('mds_imagegrid_app_url', $default));
 }
 
 /**
@@ -179,6 +183,7 @@ function mds_imagegrid_activate() {
     add_option('mds_imagegrid_auto_render', false);
     add_option('mds_imagegrid_api_url', mds_imagegrid_default_api_url());
     add_option('mds_imagegrid_api_key', '', '', 'no');
+    add_option('mds_imagegrid_connection', [], '', 'no');
     add_option('mds_imagegrid_last_account', [], '', 'no');
     add_option('mds_imagegrid_last_connection', [], '', 'no');
     set_transient('mds_imagegrid_activated', true, 30);

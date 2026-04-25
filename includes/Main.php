@@ -70,8 +70,35 @@ class Main {
 
         add_filter('mds_grid_remote_tile_request', [$this, 'get_remote_tile_request'], 10, 5);
         add_filter('mds_grid_has_remote_tiles', [$this, 'has_remote_tiles'], 10, 2);
+        add_filter('mds3_imagegrid_api_url', [$this, 'filter_mds3_api_url']);
+        add_filter('mds3_imagegrid_api_key', [$this, 'filter_mds3_api_key']);
+        add_filter('mds3_imagegrid_submit_render', [$this, 'submit_mds3_render'], 10, 3);
         add_filter('mds_image_processor_generate_tiles_for_grid', [$this, 'maybe_start_remote_generation'], 10, 3);
         add_filter('mds_imagegrid_client', [$this, 'filter_client']);
+    }
+
+    /**
+     * Provide the extension-owned API URL to MDS3 core services.
+     *
+     * @param string $api_url Existing URL.
+     * @return string
+     */
+    public function filter_mds3_api_url($api_url) {
+        $configured = (string) get_option('mds_imagegrid_api_url', '');
+
+        return '' !== $configured ? untrailingslashit($configured) : (string) $api_url;
+    }
+
+    /**
+     * Provide the extension-owned API key to MDS3 core services.
+     *
+     * @param string $api_key Existing key.
+     * @return string
+     */
+    public function filter_mds3_api_key($api_key) {
+        $configured = (string) get_option('mds_imagegrid_api_key', '');
+
+        return '' !== $configured ? $configured : (string) $api_key;
     }
 
     /**
@@ -149,6 +176,10 @@ class Main {
         $grid = isset($context['grid']) ? $context['grid'] : null;
 
         if (!$grid || !is_object($grid)) {
+            if (!class_exists('\\MDS\\Core\\Grid')) {
+                return $result;
+            }
+
             $grid_model = new \MDS\Core\Grid();
             $grid = $grid_model->get($grid_id);
         }
@@ -184,6 +215,59 @@ class Main {
     }
 
     /**
+     * Submit an MDS3 render manifest to ImageGrid.
+     *
+     * @param mixed $result    Existing filter result.
+     * @param array $manifest  MDS3 manifest.
+     * @param array $preflight Core preflight data.
+     * @return mixed
+     */
+    public function submit_mds3_render($result, array $manifest, array $preflight) {
+        if (null !== $result || !self::is_enabled()) {
+            return $result;
+        }
+
+        $client = $this->client();
+        $ready = $client->ready();
+        if (is_wp_error($ready)) {
+            return $ready;
+        }
+
+        $response = $client->create_manifest_render_job($manifest, $preflight);
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $grid_id = absint($manifest['grid']['id'] ?? 0);
+        $job_id = sanitize_text_field((string) ($response['id'] ?? $response['job_id'] ?? ''));
+        $result_payload = is_array($response['result'] ?? null) ? $response['result'] : [];
+        $tileset_id = sanitize_text_field((string) ($result_payload['tileset_id'] ?? $response['tileset_id'] ?? ''));
+        $status = self::normalize_job_status($response['status'] ?? 'pending');
+
+        if ($grid_id) {
+            self::update_grid_state($grid_id, [
+                'job_id' => $job_id,
+                'status' => $status,
+                'operation' => $response['operation'] ?? 'mds_grid_composition',
+                'tileset_id' => $tileset_id,
+                'format' => $result_payload['format'] ?? 'png',
+                'preflight' => $preflight,
+                'submitted_at' => current_time('mysql'),
+                'updated_at' => current_time('mysql'),
+                'last_error' => '',
+            ]);
+        }
+
+        return [
+            'remote_job_id' => $job_id,
+            'remote_tileset_id' => $tileset_id,
+            'status' => $status,
+            'operation' => $response['operation'] ?? 'mds_grid_composition',
+            'result' => $response,
+        ];
+    }
+
+    /**
      * Submit a grid render job.
      *
      * @param int                 $grid_id Grid ID.
@@ -194,8 +278,7 @@ class Main {
         $grid_id = absint($grid_id);
 
         if (!$grid) {
-            $grid_model = new \MDS\Core\Grid();
-            $grid = $grid_model->get($grid_id);
+            $grid = self::get_grid($grid_id);
         }
 
         if (!$grid) {
@@ -340,6 +423,28 @@ class Main {
      */
     private function client() {
         return new API_Client();
+    }
+
+    /**
+     * Resolve a grid from the active MDS version.
+     *
+     * @param int $grid_id Grid ID.
+     * @return object|null
+     */
+    private static function get_grid($grid_id) {
+        $grid_id = absint($grid_id);
+
+        if (class_exists('\\MDS3\\Grid\\GridRepository')) {
+            return (new \MDS3\Grid\GridRepository())->find($grid_id);
+        }
+
+        if (class_exists('\\MDS\\Core\\Grid')) {
+            $grid_model = new \MDS\Core\Grid();
+
+            return $grid_model->get($grid_id);
+        }
+
+        return null;
     }
 
     /**

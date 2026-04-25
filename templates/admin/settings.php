@@ -10,11 +10,14 @@
  * @var bool  $has_api_key
  * @var array $last_account
  * @var array $last_connection
+ * @var array $connection
  * @var array $grids
  * @var int   $selected_grid_id
  * @var array $selected_state
  * @var string $app_url
+ * @var string $connect_url
  * @var array|null $notice
+ * @var string $page_slug
  */
 
 if (!defined('ABSPATH')) {
@@ -24,6 +27,7 @@ if (!defined('ABSPATH')) {
 $account = isset($last_account['account']) && is_array($last_account['account']) ? $last_account['account'] : [];
 $api_key = isset($last_account['api_key']) && is_array($last_account['api_key']) ? $last_account['api_key'] : [];
 $connection_status = $last_connection['status'] ?? 'not_connected';
+$has_connection = $has_api_key || !empty($connection);
 ?>
 
 <div class="wrap mds-imagegrid-wrap">
@@ -33,7 +37,7 @@ $connection_status = $last_connection['status'] ?? 'not_connected';
     </p>
 
     <?php if ($notice) : ?>
-        <div class="notice notice-<?php echo esc_attr('error' === $notice['type'] ? 'error' : 'success'); ?> is-dismissible">
+        <div class="notice notice-<?php echo esc_attr(\MDS\Extensions\ImageGrid\Admin::notice_class($notice['type'])); ?> is-dismissible">
             <p><?php echo esc_html($notice['message']); ?></p>
         </div>
     <?php endif; ?>
@@ -93,24 +97,73 @@ $connection_status = $last_connection['status'] ?? 'not_connected';
 
                 <p class="submit">
                     <button type="submit" class="button button-primary"><?php esc_html_e('Save Settings', 'mds-imagegrid'); ?></button>
-                    <?php if (!empty($app_url)) : ?>
-                        <a class="button" href="<?php echo esc_url($app_url . '/app/signup'); ?>" target="_blank" rel="noopener noreferrer">
-                            <?php esc_html_e('Create ImageGrid Account', 'mds-imagegrid'); ?>
-                        </a>
-                        <a class="button" href="<?php echo esc_url($app_url . '/app/login'); ?>" target="_blank" rel="noopener noreferrer">
-                            <?php esc_html_e('Manage API Keys', 'mds-imagegrid'); ?>
-                        </a>
-                    <?php endif; ?>
                 </p>
             </form>
 
-            <form class="mds-imagegrid-actions" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field('mds_imagegrid_test_connection'); ?>
-                <input type="hidden" name="action" value="mds_imagegrid_test_connection">
-                <button type="submit" class="button" <?php disabled(!$has_api_key); ?>>
-                    <?php esc_html_e('Test Connection', 'mds-imagegrid'); ?>
-                </button>
-            </form>
+            <div class="mds-imagegrid-connect-tools">
+                <?php if (!empty($connect_url)) : ?>
+                    <a class="button button-primary" href="<?php echo esc_url($connect_url); ?>">
+                        <?php esc_html_e('Connect ImageGrid', 'mds-imagegrid'); ?>
+                    </a>
+                <?php endif; ?>
+
+                <form class="mds-imagegrid-inline-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('mds_imagegrid_test_connection'); ?>
+                    <input type="hidden" name="action" value="mds_imagegrid_test_connection">
+                    <button type="submit" class="button" <?php disabled(!$has_api_key); ?>>
+                        <?php esc_html_e('Test Connection', 'mds-imagegrid'); ?>
+                    </button>
+                </form>
+
+                <?php if ($has_connection) : ?>
+                    <form class="mds-imagegrid-inline-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                        <?php wp_nonce_field('mds_imagegrid_disconnect'); ?>
+                        <input type="hidden" name="action" value="mds_imagegrid_disconnect">
+                        <button type="submit" class="button button-link-delete">
+                            <?php esc_html_e('Disconnect', 'mds-imagegrid'); ?>
+                        </button>
+                    </form>
+                <?php endif; ?>
+
+                <span class="mds-imagegrid-action-spacer" aria-hidden="true"></span>
+
+                <?php if (!empty($app_url)) : ?>
+                    <a class="button" href="<?php echo esc_url($app_url . '/app/signup'); ?>" target="_blank" rel="noopener noreferrer">
+                        <?php esc_html_e('Create ImageGrid Account', 'mds-imagegrid'); ?>
+                    </a>
+                    <a class="button" href="<?php echo esc_url($app_url . '/app/login'); ?>" target="_blank" rel="noopener noreferrer">
+                        <?php esc_html_e('Manage API Keys', 'mds-imagegrid'); ?>
+                    </a>
+                <?php endif; ?>
+            </div>
+
+            <p class="description mds-imagegrid-connect-note">
+                <?php esc_html_e('Use Connect ImageGrid when the hosted ImageGrid app supports browser-based site connection. Manual API keys remain available for local development and self-hosted testing.', 'mds-imagegrid'); ?>
+            </p>
+
+            <?php if (!empty($connection)) : ?>
+                <dl class="mds-imagegrid-facts mds-imagegrid-connection-facts">
+                    <?php if (!empty($connection['connection_id'])) : ?>
+                        <div>
+                            <dt><?php esc_html_e('Connection ID', 'mds-imagegrid'); ?></dt>
+                            <dd><?php echo esc_html($connection['connection_id']); ?></dd>
+                        </div>
+                    <?php endif; ?>
+                    <?php if (!empty($connection['account_slug'])) : ?>
+                        <div>
+                            <dt><?php esc_html_e('Account', 'mds-imagegrid'); ?></dt>
+                            <dd><?php echo esc_html($connection['account_slug']); ?></dd>
+                        </div>
+                    <?php endif; ?>
+                    <?php if (!empty($connection['connected_at'])) : ?>
+                        <div>
+                            <dt><?php esc_html_e('Connected', 'mds-imagegrid'); ?></dt>
+                            <dd><?php echo esc_html($connection['connected_at']); ?></dd>
+                        </div>
+                    <?php endif; ?>
+                </dl>
+            <?php endif; ?>
+
         </section>
 
         <aside class="mds-imagegrid-panel">
@@ -148,18 +201,19 @@ $connection_status = $last_connection['status'] ?? 'not_connected';
             <p><?php esc_html_e('No MDS grids were found yet.', 'mds-imagegrid'); ?></p>
         <?php else : ?>
             <form method="get" class="mds-imagegrid-grid-select">
-                <input type="hidden" name="page" value="mds-imagegrid">
+                <input type="hidden" name="page" value="<?php echo esc_attr($page_slug); ?>">
                 <label for="mds_imagegrid_grid_id"><?php esc_html_e('Grid', 'mds-imagegrid'); ?></label>
                 <select id="mds_imagegrid_grid_id" name="grid_id" onchange="this.form.submit()">
                     <?php foreach ($grids as $grid) : ?>
                         <?php
-                        if (!is_object($grid) || !method_exists($grid, 'get_id')) {
+                        $grid_id = \MDS\Extensions\ImageGrid\Admin::grid_id($grid);
+                        if (!$grid_id) {
                             continue;
                         }
-                        $grid_id = absint($grid->get_id());
+                        $grid_title = \MDS\Extensions\ImageGrid\Admin::grid_title($grid);
                         ?>
                         <option value="<?php echo esc_attr($grid_id); ?>" <?php selected($selected_grid_id, $grid_id); ?>>
-                            <?php echo esc_html(sprintf('%s (#%d)', $grid->get_title(), $grid_id)); ?>
+                            <?php echo esc_html(sprintf('%s (#%d)', $grid_title ?: __('Untitled grid', 'mds-imagegrid'), $grid_id)); ?>
                         </option>
                     <?php endforeach; ?>
                 </select>

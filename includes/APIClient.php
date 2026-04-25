@@ -81,6 +81,44 @@ class API_Client {
     }
 
     /**
+     * Exchange a browser-returned connect token for a site-scoped API key.
+     *
+     * The hosted service owns token issuance. WordPress only accepts the short
+     * return token and stores the resulting runtime credential server-side.
+     *
+     * @param string $token Connect token returned by ImageGrid.
+     * @param array  $site  Site metadata for the exchange.
+     * @return array|\WP_Error
+     */
+    public function exchange_connect_token($token, array $site = []) {
+        $token = $this->sanitize_connect_token($token);
+        if (!$token) {
+            return new \WP_Error('mds_imagegrid_invalid_connect_token', __('The ImageGrid connect token is invalid.', 'mds-imagegrid'));
+        }
+
+        return $this->request_json('POST', '/v1/integrations/mds/connect/exchange', [
+            'token' => $token,
+            'site'  => $this->site_payload($site),
+        ], false);
+    }
+
+    /**
+     * Ask ImageGrid to revoke this site's integration credential.
+     *
+     * Local credential removal is handled by the admin layer even if the remote
+     * service cannot be reached.
+     *
+     * @param array $connection Stored connection metadata.
+     * @return array|\WP_Error
+     */
+    public function disconnect_site(array $connection = []) {
+        return $this->request_json('POST', '/v1/integrations/mds/disconnect', [
+            'connection' => $this->site_payload($connection),
+            'site'       => $this->site_payload([]),
+        ]);
+    }
+
+    /**
      * Preflight a grid composition render.
      *
      * @param \MDS\Core\Grid $grid    Grid object.
@@ -90,12 +128,22 @@ class API_Client {
     public function preflight_grid_render($grid, array $options = []) {
         $render_options = $this->build_grid_render_options($grid, $options);
         $payload = [
-            'operation' => 'mds_grid_composition',
+            'operation' => 'grid_render',
             'options'   => $render_options,
             'estimate'  => $this->estimate_grid_render($grid, $render_options),
         ];
 
-        return $this->request_json('POST', '/v1/renders/preflight', $payload);
+        $response = $this->request_json('POST', '/v1/renders/preflight', $payload);
+        if (is_wp_error($response) && in_array((int) ($response->get_error_data()['status'] ?? 0), [404, 405], true)) {
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'reason' => 'preflight_endpoint_unavailable',
+                'estimate' => $payload['estimate'],
+            ];
+        }
+
+        return $response;
     }
 
     /**
@@ -108,9 +156,39 @@ class API_Client {
     public function create_grid_render_job($grid, array $options = []) {
         $render_options = $this->build_grid_render_options($grid, $options);
         $payload = [
-            'operation' => 'mds_grid_composition',
+            'operation' => 'grid_render',
             'options'   => $render_options,
-            'estimate'  => $this->estimate_grid_render($grid, $render_options),
+        ];
+
+        return $this->request_json('POST', '/v1/jobs', $payload);
+    }
+
+    /**
+     * Create a grid composition render job from an MDS3 manifest.
+     *
+     * @param array $manifest  MDS3 render manifest.
+     * @param array $preflight MDS3 preflight data.
+     * @return array|\WP_Error
+     */
+    public function create_manifest_render_job(array $manifest, array $preflight = []) {
+        $grid = is_array($manifest['grid'] ?? null) ? $manifest['grid'] : [];
+        $options = [
+            'width' => max(1, absint($grid['width'] ?? 0)),
+            'height' => max(1, absint($grid['height'] ?? 0)),
+            'block_width' => max(1, absint($grid['block_width'] ?? 0)),
+            'block_height' => max(1, absint($grid['block_height'] ?? 0)),
+            'background_color' => '#ffffff',
+            'grid_line_color' => '#999999',
+            'grid_line_width' => 1,
+            'show_grid_lines' => true,
+            'tile_size' => max(64, absint($manifest['tile_size'] ?? 256)),
+            'format' => 'png',
+            'strategy' => 'deepzoom',
+        ];
+
+        $payload = [
+            'operation' => 'grid_render',
+            'options' => $options,
         ];
 
         return $this->request_json('POST', '/v1/jobs', $payload);
@@ -231,23 +309,34 @@ class API_Client {
         if ('' !== $body) {
             $decoded = json_decode($body, true);
 
-            if (JSON_ERROR_NONE !== json_last_error()) {
+            if (JSON_ERROR_NONE !== json_last_error() && $code >= 200 && $code < 300) {
                 return new \WP_Error(
                     'mds_imagegrid_invalid_json',
                     __('ImageGrid returned an invalid JSON response.', 'mds-imagegrid'),
                     ['status' => $code, 'body' => $body]
                 );
             }
+
+            if (JSON_ERROR_NONE !== json_last_error()) {
+                $decoded = null;
+            }
         }
 
         if ($code < 200 || $code >= 300) {
-            $message = is_array($decoded) && isset($decoded['error'])
-                ? sanitize_text_field((string) $decoded['error'])
-                : sprintf(__('ImageGrid returned HTTP %d.', 'mds-imagegrid'), $code);
+            $message = '';
+            if (is_array($decoded)) {
+                $message = sanitize_text_field((string) ($decoded['error'] ?? $decoded['message'] ?? ''));
+            }
+            if ('' === $message && '' !== $body) {
+                $message = sanitize_text_field(wp_strip_all_tags($body));
+            }
+            if ('' === $message) {
+                $message = sprintf(__('ImageGrid returned HTTP %d.', 'mds-imagegrid'), $code);
+            }
 
             return new \WP_Error('mds_imagegrid_http_error', $message, [
                 'status' => $code,
-                'body'   => $decoded,
+                'body'   => is_array($decoded) ? $decoded : $body,
             ]);
         }
 
@@ -262,32 +351,35 @@ class API_Client {
      * @return array
      */
     private function build_grid_render_options($grid, array $options = []) {
-        $grid_id = method_exists($grid, 'get_id') ? absint($grid->get_id()) : 0;
-        $background = get_post_meta($grid_id, '_mds_grid_background_color', true) ?: mds_get_option('mds_grid_background_color', '#ffffff');
-        $line_color = get_post_meta($grid_id, '_mds_grid_line_color', true) ?: mds_get_option('mds_grid_line_color', '#999999');
-        $line_width = get_post_meta($grid_id, '_mds_grid_line_width', true) ?: mds_get_option('mds_grid_line_width', 1);
+        $grid_data = $this->grid_data($grid);
+        $grid_id = absint($grid_data['id']);
+        $settings = is_array($grid_data['settings'] ?? null) ? $grid_data['settings'] : [];
+        $option_getter = function($key, $default) {
+            return function_exists('mds_get_option') ? mds_get_option($key, $default) : $default;
+        };
+        $background = $settings['background_color'] ?? (get_post_meta($grid_id, '_mds_grid_background_color', true) ?: $option_getter('mds_grid_background_color', '#ffffff'));
+        $line_color = get_post_meta($grid_id, '_mds_grid_line_color', true) ?: $option_getter('mds_grid_line_color', '#999999');
+        $line_width = get_post_meta($grid_id, '_mds_grid_line_width', true) ?: $option_getter('mds_grid_line_width', 1);
         $show_lines = get_post_meta($grid_id, '_mds_grid_show_lines', true);
 
         if ('' === $show_lines) {
-            $show_lines = mds_get_option('mds_grid_show_lines', true);
+            $show_lines = $option_getter('mds_grid_show_lines', true);
         } else {
             $show_lines = (bool) $show_lines;
         }
 
         $default_options = [
-            'width'            => max(1, absint($grid->get_width())),
-            'height'           => max(1, absint($grid->get_height())),
-            'block_width'      => max(1, absint($grid->get_block_width())),
-            'block_height'     => max(1, absint($grid->get_block_height())),
+            'width'            => max(1, absint($grid_data['width'])),
+            'height'           => max(1, absint($grid_data['height'])),
+            'block_width'      => max(1, absint($grid_data['block_width'])),
+            'block_height'     => max(1, absint($grid_data['block_height'])),
             'background_color' => sanitize_hex_color($background) ?: '#ffffff',
             'grid_line_color'  => sanitize_hex_color($line_color) ?: '#999999',
             'grid_line_width'  => max(0, absint($line_width)),
             'show_grid_lines'  => (bool) $show_lines,
             'tile_size'        => max(64, absint(get_option('mds_grid_tile_size', 256))),
             'format'           => 'png',
-            'strategy'         => 'base_grid_plus_original_detail_tiles',
-            'manifest_version' => 'mds-grid-composition-v1',
-            'placements'       => $this->build_grid_placements($grid_id),
+            'strategy'         => 'deepzoom',
         ];
 
         $max_zoom = absint(get_option('mds_max_zoom_level', 5));
@@ -306,6 +398,7 @@ class API_Client {
      * @return array
      */
     private function estimate_grid_render($grid, array $options) {
+        $grid_data = $this->grid_data($grid);
         $source_images = [];
         foreach ($options['placements'] ?? [] as $placement) {
             if (!empty($placement['source']['width']) && !empty($placement['source']['height'])) {
@@ -319,8 +412,8 @@ class API_Client {
         if (class_exists(RenderEstimate::class)) {
             return RenderEstimate::for_grid(
                 [
-                    'width' => max(1, absint($grid->get_width())),
-                    'height' => max(1, absint($grid->get_height())),
+                    'width' => max(1, absint($grid_data['width'])),
+                    'height' => max(1, absint($grid_data['height'])),
                 ],
                 $source_images,
                 (int) ($options['tile_size'] ?? 256),
@@ -329,7 +422,7 @@ class API_Client {
         }
 
         return [
-            'grid_megapixels' => round((max(1, absint($grid->get_width())) * max(1, absint($grid->get_height()))) / 1000000, 4),
+            'grid_megapixels' => round((max(1, absint($grid_data['width'])) * max(1, absint($grid_data['height']))) / 1000000, 4),
             'source_megapixels' => 0,
             'tile_estimate' => 0,
             'storage_estimate_bytes' => 0,
@@ -360,15 +453,15 @@ class API_Client {
         }
 
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM {$table} WHERE grid_id = %d AND status IN ('approved', 'ready', 'sold', 'purchased') ORDER BY sort_order ASC, id ASC",
+            "SELECT * FROM {$table} WHERE grid_id = %d AND status IN ('active', 'pending', 'approved', 'ready', 'sold', 'purchased') ORDER BY sort_order ASC, id ASC",
             $grid_id
         ));
 
-        $resolver = class_exists(OriginalAttachmentResolver::class) ? new OriginalAttachmentResolver() : null;
+        $resolver = $this->source_resolver();
         $placements = [];
 
         foreach ($rows as $row) {
-            $source = $resolver ? $resolver->resolve((int) $row->attachment_id) : null;
+            $source = $resolver && method_exists($resolver, 'resolve') ? $resolver->resolve((int) $row->attachment_id) : null;
 
             $placements[] = [
                 'id' => (int) $row->id,
@@ -405,6 +498,53 @@ class API_Client {
     }
 
     /**
+     * Normalize grid data across supported MDS versions.
+     *
+     * @param object $grid Grid object.
+     * @return array
+     */
+    private function grid_data($grid) {
+        if (is_object($grid) && method_exists($grid, 'to_array')) {
+            $data = $grid->to_array();
+
+            return [
+                'id' => absint($data['id'] ?? 0),
+                'width' => max(1, absint($data['width'] ?? 1000)),
+                'height' => max(1, absint($data['height'] ?? 1000)),
+                'block_width' => max(1, absint($data['block_width'] ?? 10)),
+                'block_height' => max(1, absint($data['block_height'] ?? 10)),
+                'settings' => is_array($data['settings'] ?? null) ? $data['settings'] : [],
+            ];
+        }
+
+        return [
+            'id' => is_object($grid) && method_exists($grid, 'get_id') ? absint($grid->get_id()) : 0,
+            'width' => is_object($grid) && method_exists($grid, 'get_width') ? max(1, absint($grid->get_width())) : 1000,
+            'height' => is_object($grid) && method_exists($grid, 'get_height') ? max(1, absint($grid->get_height())) : 1000,
+            'block_width' => is_object($grid) && method_exists($grid, 'get_block_width') ? max(1, absint($grid->get_block_width())) : 10,
+            'block_height' => is_object($grid) && method_exists($grid, 'get_block_height') ? max(1, absint($grid->get_block_height())) : 10,
+            'settings' => [],
+        ];
+    }
+
+    /**
+     * Resolve the best available source image resolver.
+     *
+     * @return object|null
+     */
+    private function source_resolver() {
+        if (class_exists('\\MDS3\\Media\\OriginalImage')) {
+            return new \MDS3\Media\OriginalImage();
+        }
+
+        if (class_exists(OriginalAttachmentResolver::class)) {
+            return new OriginalAttachmentResolver();
+        }
+
+        return null;
+    }
+
+    /**
      * Authentication headers.
      *
      * @return array
@@ -435,6 +575,43 @@ class API_Client {
         }
 
         return ['Host' => $target];
+    }
+
+    /**
+     * Sanitize a connect token without weakening entropy.
+     *
+     * @param string $token Raw token.
+     * @return string
+     */
+    private function sanitize_connect_token($token) {
+        $token = trim((string) $token);
+        $token = preg_replace('/[^A-Za-z0-9._~:-]/', '', $token);
+
+        return strlen((string) $token) >= 12 && strlen((string) $token) <= 512 ? (string) $token : '';
+    }
+
+    /**
+     * Build site metadata for ImageGrid integration calls.
+     *
+     * @param array $site Additional metadata.
+     * @return array
+     */
+    private function site_payload(array $site) {
+        return array_filter([
+            'site_url' => esc_url_raw((string) ($site['site_url'] ?? home_url('/'))),
+            'admin_url' => esc_url_raw((string) ($site['admin_url'] ?? admin_url())),
+            'site_name' => sanitize_text_field((string) ($site['site_name'] ?? get_bloginfo('name'))),
+            'timezone' => sanitize_text_field((string) ($site['timezone'] ?? wp_timezone_string())),
+            'wordpress_version' => sanitize_text_field((string) get_bloginfo('version')),
+            'plugin_version' => MDS_IMAGEGRID_VERSION,
+            'mds_version' => defined('MDS3_VERSION') ? MDS3_VERSION : '',
+            'connection_id' => sanitize_text_field((string) ($site['connection_id'] ?? '')),
+            'account_id' => sanitize_text_field((string) ($site['account_id'] ?? '')),
+            'account_slug' => sanitize_key((string) ($site['account_slug'] ?? '')),
+            'api_key_id' => sanitize_text_field((string) ($site['api_key_id'] ?? '')),
+        ], static function ($value) {
+            return '' !== $value && null !== $value;
+        });
     }
 
     /**

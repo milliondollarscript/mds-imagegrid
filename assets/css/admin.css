@@ -71,6 +71,33 @@
     align-items: center;
 }
 
+.mds-imagegrid-connect-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.mds-imagegrid-inline-form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.mds-imagegrid-action-spacer {
+    flex: 1 1 20px;
+}
+
+.mds-imagegrid-connect-note {
+    margin-top: 10px;
+}
+
+.mds-imagegrid-connection-facts {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #dcdcde;
+}
+
 .mds-imagegrid-facts {
     display: grid;
     gap: 10px;

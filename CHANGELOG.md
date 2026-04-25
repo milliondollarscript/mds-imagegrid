@@ -4,8 +4,11 @@
 
 - Reclassify MDS ImageGrid as a free connector for the paid ImageGrid service.
 - Split browser app links from the configurable server API URL.
+- Add MDS3 Settings, admin menu, and Edit Grid tab hooks.
+- Keep ImageGrid credentials in extension-owned options while exposing them to MDS3 core through filters.
+- Add hosted ImageGrid connect-token return handling, site-scoped credential storage, and disconnect controls.
 - Add render preflight before job submission.
-- Send MDS grid-composition manifests instead of treating every render as one flattened canvas.
+- Submit current ImageGrid `grid_render` jobs and tolerate local API deployments without the optional preflight endpoint.
 
 ## 1.0.0
 
