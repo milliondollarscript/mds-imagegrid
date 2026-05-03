@@ -24,9 +24,10 @@ class Admin {
     public static function init() {
         add_action('admin_menu', [__CLASS__, 'register_menu'], 36);
         add_action('mds3_admin_menu', [__CLASS__, 'register_mds3_menu']);
+        add_action('admin_head', [__CLASS__, 'hide_mds3_sidebar_menu']);
         add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_assets']);
-        add_filter('mds3_admin_settings_tabs', [__CLASS__, 'register_mds3_settings_tab']);
-        add_action('mds3_admin_settings_panels', [__CLASS__, 'render_mds3_settings_panel']);
+        add_filter('mds3_dashboard_menu_items', [__CLASS__, 'register_mds3_dashboard_menu']);
+        add_action('mds3_admin_settings_group_rendering', [__CLASS__, 'render_mds3_settings_panel']);
         add_filter('mds3_admin_grid_tabs', [__CLASS__, 'register_mds3_grid_tab'], 10, 2);
         add_action('mds3_admin_grid_tab_panels', [__CLASS__, 'render_mds3_grid_panel'], 10, 2);
         add_filter('mds3_admin_validate_settings', [__CLASS__, 'validate_mds3_settings'], 10, 3);
@@ -81,13 +82,55 @@ class Admin {
     }
 
     /**
+     * Keep ImageGrid in the Million Dollar Script dashboard menu instead of the WordPress sidebar.
+     *
+     * @return void
+     */
+    public static function hide_mds3_sidebar_menu() {
+        if (defined('MDS3_VERSION')) {
+            remove_submenu_page('mds3', 'mds3-imagegrid');
+        }
+    }
+
+    /**
+     * Add ImageGrid to the internal MDS3 dashboard menu without crowding the WordPress sidebar.
+     *
+     * @param array $groups Existing dashboard menu groups.
+     * @return array
+     */
+    public static function register_mds3_dashboard_menu(array $groups) {
+        if (!defined('MDS3_VERSION')) {
+            return $groups;
+        }
+
+        if (!isset($groups['extend']) || !is_array($groups['extend'])) {
+            $groups['extend'] = [
+                'label' => __('Extend', 'mds-imagegrid'),
+                'items' => [],
+            ];
+        }
+
+        if (empty($groups['extend']['items']) || !is_array($groups['extend']['items'])) {
+            $groups['extend']['items'] = [];
+        }
+
+        $groups['extend']['items'][] = [
+            'label' => __('ImageGrid', 'mds-imagegrid'),
+            'url' => admin_url('admin.php?page=mds3-imagegrid'),
+            'icon' => 'dashicons-format-image',
+        ];
+
+        return $groups;
+    }
+
+    /**
      * Enqueue admin CSS.
      *
      * @param string $hook Current admin hook.
      * @return void
      */
     public static function enqueue_assets($hook) {
-        if (!in_array($hook, ['mds-dashboard_page_mds-imagegrid', 'mds_page_mds-imagegrid', 'million-dollar-script_page_mds3-settings', 'million-dollar-script_page_mds3-grids', 'million-dollar-script_page_mds3-imagegrid'], true)) {
+        if (!in_array($hook, ['mds-dashboard_page_mds-imagegrid', 'mds_page_mds-imagegrid', 'million-dollar-script_page_mds3-settings', 'million-dollar-script_page_mds3-grids', 'million-dollar-script_page_mds3-imagegrid', 'admin_page_mds3-imagegrid'], true)) {
             return;
         }
 
@@ -113,6 +156,12 @@ class Admin {
         $auto_render = (bool) get_option('mds_imagegrid_auto_render', false);
         $api_url = (string) get_option('mds_imagegrid_api_url', mds_imagegrid_default_api_url());
         $has_api_key = '' !== (string) get_option('mds_imagegrid_api_key', '');
+        $threshold = self::number_option('mds_imagegrid_local_render_threshold_megapixels', 25);
+        $quota_grid = self::number_option('mds_imagegrid_quota_grid_megapixels', 100);
+        $quota_source = self::number_option('mds_imagegrid_quota_source_megapixels', 250);
+        $quota_tiles = self::number_option('mds_imagegrid_quota_tile_estimate', 12000);
+        $quota_storage = self::number_option('mds_imagegrid_quota_storage_bytes', 2147483648);
+        $quota_credits = self::number_option('mds_imagegrid_quota_processing_credits', 5000);
         $last_account = get_option('mds_imagegrid_last_account', []);
         $last_connection = get_option('mds_imagegrid_last_connection', []);
         $connection = self::connection();
@@ -134,19 +183,7 @@ class Admin {
     }
 
     /**
-     * Add ImageGrid to the MDS3 core Settings tabs.
-     *
-     * @param array $tabs Existing tabs.
-     * @return array
-     */
-    public static function register_mds3_settings_tab(array $tabs) {
-        $tabs['imagegrid'] = __('ImageGrid', 'mds-imagegrid');
-
-        return $tabs;
-    }
-
-    /**
-     * Render ImageGrid settings inside the MDS3 core Settings form.
+     * Render ImageGrid settings inside the MDS3 core Rendering settings panel.
      *
      * @return void
      */
@@ -155,6 +192,12 @@ class Admin {
         $auto_render = (bool) get_option('mds_imagegrid_auto_render', false);
         $api_url = (string) get_option('mds_imagegrid_api_url', mds_imagegrid_default_api_url());
         $has_api_key = '' !== (string) get_option('mds_imagegrid_api_key', '');
+        $threshold = self::number_option('mds_imagegrid_local_render_threshold_megapixels', 25);
+        $quota_grid = self::number_option('mds_imagegrid_quota_grid_megapixels', 100);
+        $quota_source = self::number_option('mds_imagegrid_quota_source_megapixels', 250);
+        $quota_tiles = self::number_option('mds_imagegrid_quota_tile_estimate', 12000);
+        $quota_storage = self::number_option('mds_imagegrid_quota_storage_bytes', 2147483648);
+        $quota_credits = self::number_option('mds_imagegrid_quota_processing_credits', 5000);
         $last_connection = get_option('mds_imagegrid_last_connection', []);
         $app_url = self::get_app_url();
         $connect_url = self::connect_url();
@@ -162,18 +205,24 @@ class Admin {
         $has_connection = $has_api_key || !empty($connection);
         $connection_status = is_array($last_connection) ? ($last_connection['status'] ?? 'not_connected') : 'not_connected';
 
-        echo '<section class="mds3-settings-panel" data-settings-panel="imagegrid"><h2>' . esc_html__('ImageGrid', 'mds-imagegrid') . '</h2>';
-        echo '<p>' . esc_html__('Connect MDS zoomable grids to ImageGrid for remote rendering and authenticated tile delivery.', 'mds-imagegrid') . '</p>';
+        echo '<div class="mds-imagegrid-core-settings">';
+        echo '<h3>' . esc_html__('ImageGrid remote rendering', 'mds-imagegrid') . '</h3>';
+        echo '<p class="description">' . esc_html__('Connect Million Dollar Script zoomable grids to ImageGrid for remote rendering and authenticated tile delivery.', 'mds-imagegrid') . '</p>';
         echo '<p><span class="mds-imagegrid-status mds-imagegrid-status-' . esc_attr($connection_status) . '">' . esc_html('connected' === $connection_status ? __('Connected', 'mds-imagegrid') : __('Not Connected', 'mds-imagegrid')) . '</span></p>';
-        echo '<div class="mds3-settings-form">';
         self::checkbox_field('mds_imagegrid_enabled', __('Enable ImageGrid', 'mds-imagegrid'), $enabled, __('Serve ready remote tiles for grids that have an ImageGrid tileset.', 'mds-imagegrid'));
-        self::checkbox_field('mds_imagegrid_auto_render', __('Automatic rendering', 'mds-imagegrid'), $auto_render, __('Submit a remote render job when MDS requests tile generation.', 'mds-imagegrid'));
+        self::checkbox_field('mds_imagegrid_auto_render', __('Automatic rendering', 'mds-imagegrid'), $auto_render, __('Submit a remote render job when Million Dollar Script requests tile generation.', 'mds-imagegrid'));
         self::input_field('mds_imagegrid_api_url', __('API URL', 'mds-imagegrid'), 'url', $api_url, __('Server API URL. This can point at local Docker during development and is never used for browser account links.', 'mds-imagegrid'));
         self::input_field('mds_imagegrid_api_key', __('API key', 'mds-imagegrid'), 'password', '', $has_api_key ? __('Saved key is hidden. Leave blank to keep it.', 'mds-imagegrid') : __('Paste an ImageGrid API key.', 'mds-imagegrid'), $has_api_key ? __('Saved key is hidden', 'mds-imagegrid') : __('Paste an ImageGrid API key', 'mds-imagegrid'));
         if ($has_api_key) {
             self::checkbox_field('mds_imagegrid_clear_api_key', __('Clear saved key', 'mds-imagegrid'), false, __('Remove the saved API key during this settings save.', 'mds-imagegrid'));
         }
-        echo '</div><p class="mds3-button-row">';
+        self::input_field('mds_imagegrid_local_render_threshold_megapixels', __('Local Render Threshold MP', 'mds-imagegrid'), 'number', (string) $threshold, __('Use local rendering at or below this grid size. Larger grids can use ImageGrid when configured.', 'mds-imagegrid'));
+        self::input_field('mds_imagegrid_quota_grid_megapixels', __('Grid Megapixel Quota', 'mds-imagegrid'), 'number', (string) $quota_grid, __('Maximum grid megapixels allowed for a remote ImageGrid job.', 'mds-imagegrid'));
+        self::input_field('mds_imagegrid_quota_source_megapixels', __('Source Megapixel Quota', 'mds-imagegrid'), 'number', (string) $quota_source, __('Maximum combined source-image megapixels allowed for a remote ImageGrid job.', 'mds-imagegrid'));
+        self::input_field('mds_imagegrid_quota_tile_estimate', __('Tile Estimate Quota', 'mds-imagegrid'), 'number', (string) $quota_tiles, __('Maximum estimated tile count allowed for a remote ImageGrid job.', 'mds-imagegrid'));
+        self::input_field('mds_imagegrid_quota_storage_bytes', __('Storage Byte Quota', 'mds-imagegrid'), 'number', (string) $quota_storage, __('Maximum estimated storage footprint allowed for a remote ImageGrid job.', 'mds-imagegrid'));
+        self::input_field('mds_imagegrid_quota_processing_credits', __('Processing Credit Quota', 'mds-imagegrid'), 'number', (string) $quota_credits, __('Maximum estimated processing credits allowed for a remote ImageGrid job.', 'mds-imagegrid'));
+        echo '<p class="mds3-button-row">';
         if (!empty($connect_url)) {
             echo '<a class="button button-primary" href="' . esc_url($connect_url) . '">' . esc_html__('Connect ImageGrid', 'mds-imagegrid') . '</a>';
         }
@@ -182,7 +231,7 @@ class Admin {
             echo '<a class="button" href="' . esc_url($app_url . '/app/login') . '" target="_blank" rel="noopener noreferrer">' . esc_html__('Manage API Keys', 'mds-imagegrid') . '</a>';
         }
         echo '<a class="button" href="' . esc_url(admin_url('admin.php?page=' . self::settings_page_slug())) . '">' . esc_html($has_connection ? __('Manage Connection', 'mds-imagegrid') : __('Open ImageGrid Settings', 'mds-imagegrid')) . '</a>';
-        echo '</p></section>';
+        echo '</p></div>';
     }
 
     /**
@@ -219,7 +268,7 @@ class Admin {
         if ($notice) {
             echo '<div class="notice notice-' . esc_attr(self::notice_class($notice['type'])) . ' inline"><p>' . esc_html($notice['message']) . '</p></div>';
         }
-        echo '<p>' . esc_html__('Submit this grid for hosted ImageGrid rendering and serve ready remote tiles through MDS.', 'mds-imagegrid') . '</p>';
+        echo '<p>' . esc_html__('Submit this grid for hosted ImageGrid rendering and serve ready remote tiles through Million Dollar Script.', 'mds-imagegrid') . '</p>';
 
         if (!$enabled || !$has_api_key) {
             echo '<p class="description">' . esc_html__('Enable ImageGrid and save an API key in Settings before submitting render jobs.', 'mds-imagegrid') . '</p>';
@@ -261,7 +310,7 @@ class Admin {
             ? esc_url_raw(trim((string) $post['mds_imagegrid_api_url']))
             : mds_imagegrid_default_api_url();
 
-        if (!$api_url || !API_Client::is_allowed_url($api_url)) {
+        if ('' !== $api_url && !API_Client::is_allowed_url($api_url)) {
             $errors->add('mds_imagegrid_invalid_api_url', __('Enter a valid ImageGrid service URL.', 'mds-imagegrid'));
         }
 
@@ -282,6 +331,7 @@ class Admin {
         update_option('mds_imagegrid_enabled', !empty($post['mds_imagegrid_enabled']));
         update_option('mds_imagegrid_auto_render', !empty($post['mds_imagegrid_auto_render']));
         update_option('mds_imagegrid_api_url', untrailingslashit(esc_url_raw(trim((string) ($post['mds_imagegrid_api_url'] ?? mds_imagegrid_default_api_url())))));
+        self::save_rendering_limits($post);
 
         $submitted_key = trim((string) ($post['mds_imagegrid_api_key'] ?? ''));
         if (!empty($post['mds_imagegrid_clear_api_key'])) {
@@ -319,13 +369,14 @@ class Admin {
             ? esc_url_raw(trim((string) wp_unslash($_POST['mds_imagegrid_api_url'])))
             : mds_imagegrid_default_api_url();
 
-        if (!$api_url || !API_Client::is_allowed_url($api_url)) {
+        if ('' !== $api_url && !API_Client::is_allowed_url($api_url)) {
             self::redirect_with_notice('error', __('Enter a valid ImageGrid service URL.', 'mds-imagegrid'));
         }
 
         update_option('mds_imagegrid_enabled', isset($_POST['mds_imagegrid_enabled']));
         update_option('mds_imagegrid_auto_render', isset($_POST['mds_imagegrid_auto_render']));
         update_option('mds_imagegrid_api_url', untrailingslashit($api_url));
+        self::save_rendering_limits(wp_unslash($_POST));
 
         $submitted_key = isset($_POST['mds_imagegrid_api_key'])
             ? trim((string) wp_unslash($_POST['mds_imagegrid_api_key']))
@@ -647,6 +698,65 @@ class Admin {
             echo '<span class="description">' . esc_html($description) . '</span>';
         }
         echo '</p>';
+    }
+
+    /**
+     * Persist numeric rendering limits from a settings form.
+     *
+     * @param array $post Raw unslashed POST values.
+     * @return void
+     */
+    private static function save_rendering_limits(array $post) {
+        $limits = [
+            'mds_imagegrid_local_render_threshold_megapixels' => 25,
+            'mds_imagegrid_quota_grid_megapixels' => 100,
+            'mds_imagegrid_quota_source_megapixels' => 250,
+            'mds_imagegrid_quota_tile_estimate' => 12000,
+            'mds_imagegrid_quota_storage_bytes' => 2147483648,
+            'mds_imagegrid_quota_processing_credits' => 5000,
+        ];
+
+        foreach ($limits as $key => $default) {
+            update_option($key, self::number_from_post($post, $key, $default), false);
+        }
+    }
+
+    /**
+     * Read a numeric option with a safe fallback.
+     *
+     * @param string $key     Option key.
+     * @param float  $default Default value.
+     * @return float
+     */
+    private static function number_option($key, $default) {
+        return self::positive_number(get_option($key, $default), $default);
+    }
+
+    /**
+     * Read a numeric POST value with a safe fallback.
+     *
+     * @param array  $post    Raw unslashed POST values.
+     * @param string $key     Field key.
+     * @param float  $default Default value.
+     * @return float
+     */
+    private static function number_from_post(array $post, $key, $default) {
+        return self::positive_number($post[$key] ?? $default, $default);
+    }
+
+    /**
+     * Sanitize a positive numeric value.
+     *
+     * @param mixed $value   Raw value.
+     * @param float $default Default value.
+     * @return float
+     */
+    private static function positive_number($value, $default) {
+        if (!is_numeric($value)) {
+            return (float) $default;
+        }
+
+        return max(0, (float) $value);
     }
 
     /**

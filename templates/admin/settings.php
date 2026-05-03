@@ -33,7 +33,7 @@ $has_connection = $has_api_key || !empty($connection);
 <div class="wrap mds-imagegrid-wrap">
     <h1 class="wp-heading-inline"><?php esc_html_e('ImageGrid', 'mds-imagegrid'); ?></h1>
     <p class="mds-imagegrid-lede">
-        <?php esc_html_e('Connect MDS zoomable grids to ImageGrid for remote rendering and authenticated tile delivery.', 'mds-imagegrid'); ?>
+        <?php esc_html_e('Connect Million Dollar Script zoomable grids to ImageGrid for remote rendering and authenticated tile delivery.', 'mds-imagegrid'); ?>
     </p>
 
     <?php if ($notice) : ?>
@@ -70,7 +70,7 @@ $has_connection = $has_api_key || !empty($connection);
                         <td>
                             <label>
                                 <input type="checkbox" name="mds_imagegrid_auto_render" value="1" <?php checked($auto_render); ?>>
-                                <?php esc_html_e('Submit a remote render job when MDS requests tile generation.', 'mds-imagegrid'); ?>
+                                <?php esc_html_e('Submit a remote render job when Million Dollar Script requests tile generation.', 'mds-imagegrid'); ?>
                             </label>
                         </td>
                     </tr>
@@ -92,6 +92,33 @@ $has_connection = $has_api_key || !empty($connection);
                                 </label>
                             <?php endif; ?>
                         </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="mds_imagegrid_local_render_threshold_megapixels"><?php esc_html_e('Local Render Threshold MP', 'mds-imagegrid'); ?></label></th>
+                        <td>
+                            <input type="number" class="small-text" id="mds_imagegrid_local_render_threshold_megapixels" name="mds_imagegrid_local_render_threshold_megapixels" value="<?php echo esc_attr($threshold); ?>" min="0" step="0.01">
+                            <p class="description"><?php esc_html_e('Use local rendering at or below this grid size. Larger grids can use ImageGrid when configured.', 'mds-imagegrid'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="mds_imagegrid_quota_grid_megapixels"><?php esc_html_e('Grid Megapixel Quota', 'mds-imagegrid'); ?></label></th>
+                        <td><input type="number" class="small-text" id="mds_imagegrid_quota_grid_megapixels" name="mds_imagegrid_quota_grid_megapixels" value="<?php echo esc_attr($quota_grid); ?>" min="0" step="0.01"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="mds_imagegrid_quota_source_megapixels"><?php esc_html_e('Source Megapixel Quota', 'mds-imagegrid'); ?></label></th>
+                        <td><input type="number" class="small-text" id="mds_imagegrid_quota_source_megapixels" name="mds_imagegrid_quota_source_megapixels" value="<?php echo esc_attr($quota_source); ?>" min="0" step="0.01"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="mds_imagegrid_quota_tile_estimate"><?php esc_html_e('Tile Estimate Quota', 'mds-imagegrid'); ?></label></th>
+                        <td><input type="number" class="small-text" id="mds_imagegrid_quota_tile_estimate" name="mds_imagegrid_quota_tile_estimate" value="<?php echo esc_attr($quota_tiles); ?>" min="0" step="1"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="mds_imagegrid_quota_storage_bytes"><?php esc_html_e('Storage Byte Quota', 'mds-imagegrid'); ?></label></th>
+                        <td><input type="number" class="regular-text" id="mds_imagegrid_quota_storage_bytes" name="mds_imagegrid_quota_storage_bytes" value="<?php echo esc_attr($quota_storage); ?>" min="0" step="1"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="mds_imagegrid_quota_processing_credits"><?php esc_html_e('Processing Credit Quota', 'mds-imagegrid'); ?></label></th>
+                        <td><input type="number" class="small-text" id="mds_imagegrid_quota_processing_credits" name="mds_imagegrid_quota_processing_credits" value="<?php echo esc_attr($quota_credits); ?>" min="0" step="0.01"></td>
                     </tr>
                 </table>
 
@@ -198,7 +225,7 @@ $has_connection = $has_api_key || !empty($connection);
         </div>
 
         <?php if (empty($grids)) : ?>
-            <p><?php esc_html_e('No MDS grids were found yet.', 'mds-imagegrid'); ?></p>
+            <p><?php esc_html_e('No Million Dollar Script grids were found yet.', 'mds-imagegrid'); ?></p>
         <?php else : ?>
             <form method="get" class="mds-imagegrid-grid-select">
                 <input type="hidden" name="page" value="<?php echo esc_attr($page_slug); ?>">

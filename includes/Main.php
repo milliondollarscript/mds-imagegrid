@@ -63,6 +63,7 @@ class Main {
         }
 
         $this->initialized = true;
+        $this->migrate_mds3_core_settings();
 
         if (is_admin()) {
             Admin::init();
@@ -72,6 +73,8 @@ class Main {
         add_filter('mds_grid_has_remote_tiles', [$this, 'has_remote_tiles'], 10, 2);
         add_filter('mds3_imagegrid_api_url', [$this, 'filter_mds3_api_url']);
         add_filter('mds3_imagegrid_api_key', [$this, 'filter_mds3_api_key']);
+        add_filter('mds3_imagegrid_quota', [$this, 'filter_mds3_quota']);
+        add_filter('mds3_imagegrid_local_render_threshold_megapixels', [$this, 'filter_mds3_local_render_threshold']);
         add_filter('mds3_imagegrid_submit_render', [$this, 'submit_mds3_render'], 10, 3);
         add_filter('mds_image_processor_generate_tiles_for_grid', [$this, 'maybe_start_remote_generation'], 10, 3);
         add_filter('mds_imagegrid_client', [$this, 'filter_client']);
@@ -102,12 +105,81 @@ class Main {
     }
 
     /**
+     * Provide extension-owned quota settings to MDS3 core services.
+     *
+     * @param array $quota Existing quota values.
+     * @return array
+     */
+    public function filter_mds3_quota(array $quota) {
+        $mapping = [
+            'grid_megapixels' => ['mds_imagegrid_quota_grid_megapixels', 100],
+            'source_megapixels' => ['mds_imagegrid_quota_source_megapixels', 250],
+            'tile_estimate' => ['mds_imagegrid_quota_tile_estimate', 12000],
+            'storage_estimate_bytes' => ['mds_imagegrid_quota_storage_bytes', 2147483648],
+            'processing_credits' => ['mds_imagegrid_quota_processing_credits', 5000],
+        ];
+
+        foreach ($mapping as $quota_key => [$option_key, $default]) {
+            $quota[$quota_key] = (float) get_option($option_key, $default);
+        }
+
+        return $quota;
+    }
+
+    /**
+     * Provide the extension-owned local render threshold to MDS3 core services.
+     *
+     * @param float $threshold Existing threshold.
+     * @return float
+     */
+    public function filter_mds3_local_render_threshold($threshold) {
+        return (float) get_option('mds_imagegrid_local_render_threshold_megapixels', $threshold);
+    }
+
+    /**
      * Return a client instance to callers.
      *
      * @return API_Client
      */
     public function filter_client() {
         return $this->client();
+    }
+
+    /**
+     * Move legacy MDS3 core-owned ImageGrid settings into extension-owned options.
+     *
+     * @return void
+     */
+    private function migrate_mds3_core_settings() {
+        if (get_option('mds_imagegrid_migrated_mds3_core_settings')) {
+            return;
+        }
+
+        $settings = get_option('mds3_settings', []);
+        if (!is_array($settings)) {
+            update_option('mds_imagegrid_migrated_mds3_core_settings', MDS_IMAGEGRID_VERSION, false);
+            return;
+        }
+
+        $map = [
+            'imagegrid_api_url' => 'mds_imagegrid_api_url',
+            'imagegrid_api_key' => 'mds_imagegrid_api_key',
+            'local_render_threshold_megapixels' => 'mds_imagegrid_local_render_threshold_megapixels',
+            'imagegrid_quota_grid_megapixels' => 'mds_imagegrid_quota_grid_megapixels',
+            'imagegrid_quota_source_megapixels' => 'mds_imagegrid_quota_source_megapixels',
+            'imagegrid_quota_tile_estimate' => 'mds_imagegrid_quota_tile_estimate',
+            'imagegrid_quota_storage_bytes' => 'mds_imagegrid_quota_storage_bytes',
+            'imagegrid_quota_processing_credits' => 'mds_imagegrid_quota_processing_credits',
+        ];
+
+        foreach ($map as $old_key => $new_key) {
+            if (!array_key_exists($old_key, $settings) || '' === (string) $settings[$old_key]) {
+                continue;
+            }
+            update_option($new_key, $settings[$old_key], false);
+        }
+
+        update_option('mds_imagegrid_migrated_mds3_core_settings', MDS_IMAGEGRID_VERSION, false);
     }
 
     /**
