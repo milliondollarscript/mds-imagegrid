@@ -206,6 +206,7 @@ class Admin {
         $connection_status = is_array($last_connection) ? ($last_connection['status'] ?? 'not_connected') : 'not_connected';
 
         echo '<div class="mds-imagegrid-core-settings">';
+        echo '<input type="hidden" name="mds_imagegrid_settings_present" value="1" />';
         echo '<h3>' . esc_html__('ImageGrid remote rendering', 'mds-imagegrid') . '</h3>';
         echo '<p class="description">' . esc_html__('Connect Million Dollar Script zoomable grids to ImageGrid for remote rendering and authenticated tile delivery.', 'mds-imagegrid') . '</p>';
         echo '<p><span class="mds-imagegrid-status mds-imagegrid-status-' . esc_attr($connection_status) . '">' . esc_html('connected' === $connection_status ? __('Connected', 'mds-imagegrid') : __('Not Connected', 'mds-imagegrid')) . '</span></p>';
@@ -305,6 +306,9 @@ class Admin {
         if (!is_wp_error($errors)) {
             $errors = new \WP_Error();
         }
+        if (!self::mds3_settings_present($post)) {
+            return $errors;
+        }
 
         $api_url = isset($post['mds_imagegrid_api_url'])
             ? esc_url_raw(trim((string) $post['mds_imagegrid_api_url']))
@@ -328,6 +332,10 @@ class Admin {
      * @return array
      */
     public static function sanitize_mds3_settings(array $settings, array $post) {
+        if (!self::mds3_settings_present($post)) {
+            return $settings;
+        }
+
         update_option('mds_imagegrid_enabled', !empty($post['mds_imagegrid_enabled']));
         update_option('mds_imagegrid_auto_render', !empty($post['mds_imagegrid_auto_render']));
         update_option('mds_imagegrid_api_url', untrailingslashit(esc_url_raw(trim((string) ($post['mds_imagegrid_api_url'] ?? mds_imagegrid_default_api_url())))));
@@ -346,6 +354,16 @@ class Admin {
         }
 
         return $settings;
+    }
+
+    /**
+     * Check whether ImageGrid fields were rendered in the MDS3 settings form.
+     *
+     * @param array $post Raw unslashed POST values.
+     * @return bool
+     */
+    private static function mds3_settings_present(array $post) {
+        return !empty($post['mds_imagegrid_settings_present']);
     }
 
     /**
@@ -676,8 +694,9 @@ class Admin {
      * @return void
      */
     private static function checkbox_field($name, $label, $checked, $description = '') {
-        echo '<p class="mds3-field"><label><span class="mds3-field-label-text">' . esc_html($label) . '</span></label>';
-        echo '<label class="mds3-checkbox-label"><input type="checkbox" name="' . esc_attr($name) . '" value="1" ' . checked($checked, true, false) . ' /> ' . esc_html($description) . '</label></p>';
+        $field_id = sanitize_key((string) $name);
+        echo '<p class="mds3-field"><label for="' . esc_attr($field_id) . '"><span class="mds3-field-label-text">' . esc_html($label) . '</span></label>';
+        echo '<label class="mds3-checkbox-label"><input id="' . esc_attr($field_id) . '" type="checkbox" name="' . esc_attr($name) . '" value="1" ' . checked($checked, true, false) . ' /> ' . esc_html($description) . '</label></p>';
     }
 
     /**
@@ -794,7 +813,6 @@ class Admin {
                 'return_url' => rawurlencode($return_url),
                 'site_url' => home_url('/'),
                 'site_name' => get_bloginfo('name'),
-                'api_url' => (string) get_option('mds_imagegrid_api_url', mds_imagegrid_default_api_url()),
                 'plugin' => 'mds-imagegrid',
             ],
             $app_url . '/app/integrations/mds/connect'
