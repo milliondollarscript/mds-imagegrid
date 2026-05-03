@@ -74,8 +74,12 @@ class Main {
         add_filter('mds3_imagegrid_api_url', [$this, 'filter_mds3_api_url']);
         add_filter('mds3_imagegrid_api_key', [$this, 'filter_mds3_api_key']);
         add_filter('mds3_imagegrid_quota', [$this, 'filter_mds3_quota']);
+        add_filter('mds3_imagegrid_remote_enabled', [$this, 'filter_mds3_remote_enabled'], 10, 2);
+        add_filter('mds3_imagegrid_account_status', [$this, 'filter_mds3_account_status'], 10, 2);
+        add_filter('mds3_imagegrid_test_connection', [$this, 'test_mds3_connection'], 10, 2);
         add_filter('mds3_imagegrid_local_render_threshold_megapixels', [$this, 'filter_mds3_local_render_threshold']);
         add_filter('mds3_imagegrid_submit_render', [$this, 'submit_mds3_render'], 10, 3);
+        add_filter('mds3_imagegrid_poll_render', [$this, 'poll_mds3_render'], 10, 2);
         add_filter('mds_image_processor_generate_tiles_for_grid', [$this, 'maybe_start_remote_generation'], 10, 3);
         add_filter('mds_imagegrid_client', [$this, 'filter_client']);
     }
@@ -127,6 +131,76 @@ class Main {
     }
 
     /**
+     * Tell MDS3 whether remote rendering is enabled by this extension.
+     *
+     * @param bool  $enabled  Existing value.
+     * @param array $settings Core settings.
+     * @return bool
+     */
+    public function filter_mds3_remote_enabled($enabled, array $settings = []) {
+        unset($settings);
+
+        return (bool) $enabled || (self::is_enabled() && '' !== (string) get_option('mds_imagegrid_api_key', ''));
+    }
+
+    /**
+     * Provide extension-owned account status to the MDS3 dashboard.
+     *
+     * @param array $account  Existing status.
+     * @param array $settings Core settings.
+     * @return array
+     */
+    public function filter_mds3_account_status(array $account, array $settings = []) {
+        unset($settings);
+
+        $enabled = self::is_enabled();
+        $has_api_key = '' !== (string) get_option('mds_imagegrid_api_key', '');
+        $last_account = get_option('mds_imagegrid_last_account', []);
+        $last_connection = get_option('mds_imagegrid_last_connection', []);
+        $connection = get_option('mds_imagegrid_connection', []);
+        $last_account = is_array($last_account) ? $last_account : [];
+        $last_connection = is_array($last_connection) ? $last_connection : [];
+        $connection = is_array($connection) ? $connection : [];
+        $connected = $has_api_key && 'connected' === sanitize_key((string) ($last_connection['status'] ?? ''));
+        $app_url = $this->app_url();
+        $account_name = $this->account_display_name($last_account);
+
+        if ($connected && $enabled) {
+            $status = 'connected';
+            $label = __('Connected', 'mds-imagegrid');
+            $plan = $account_name ?: __('ImageGrid account connected', 'mds-imagegrid');
+            $fallback_mode = 'remote_when_needed';
+        } elseif ($has_api_key && !$enabled) {
+            $status = 'disabled';
+            $label = __('Disabled', 'mds-imagegrid');
+            $plan = __('ImageGrid configured but disabled', 'mds-imagegrid');
+            $fallback_mode = 'local';
+        } elseif ($has_api_key || !empty($connection)) {
+            $status = 'configured';
+            $label = __('Configured', 'mds-imagegrid');
+            $plan = $account_name ?: __('ImageGrid account configured', 'mds-imagegrid');
+            $fallback_mode = $enabled ? 'remote_when_needed' : 'local';
+        } else {
+            $status = 'disconnected';
+            $label = __('Local fallback', 'mds-imagegrid');
+            $plan = __('Local rendering only', 'mds-imagegrid');
+            $fallback_mode = 'local';
+        }
+
+        return array_merge($account, [
+            'status' => $status,
+            'label' => $label,
+            'plan' => $plan,
+            'usage' => $this->account_usage($last_account),
+            'account_url' => $app_url ? $app_url . '/app/account' : ($account['account_url'] ?? ''),
+            'billing_portal_url' => $app_url ? $app_url . '/app/billing' : ($account['billing_portal_url'] ?? ''),
+            'connect_url' => $this->connect_url(),
+            'reconnect_url' => $this->connect_url('reconnect'),
+            'fallback_mode' => $fallback_mode,
+        ]);
+    }
+
+    /**
      * Provide the extension-owned local render threshold to MDS3 core services.
      *
      * @param float $threshold Existing threshold.
@@ -146,21 +220,56 @@ class Main {
     }
 
     /**
+     * Test the ImageGrid connection for MDS3 REST callers.
+     *
+     * @param mixed $result   Existing result.
+     * @param array $settings Core settings.
+     * @return array|\WP_Error
+     */
+    public function test_mds3_connection($result, array $settings = []) {
+        unset($settings);
+
+        if (null !== $result) {
+            return $result;
+        }
+
+        $client = $this->client();
+        $ready = $client->ready();
+        if (is_wp_error($ready)) {
+            $this->record_connection_failure($ready->get_error_message());
+
+            return $ready;
+        }
+
+        $account = $client->account();
+        if (is_wp_error($account)) {
+            $this->record_connection_failure($account->get_error_message());
+
+            return $account;
+        }
+
+        update_option('mds_imagegrid_last_account', $account, false);
+        update_option('mds_imagegrid_last_connection', [
+            'status' => 'connected',
+            'message' => __('Connection verified.', 'mds-imagegrid'),
+            'checked_at' => current_time('mysql'),
+        ], false);
+
+        return [
+            'ok' => true,
+            'status' => 200,
+            'account_url' => $this->app_url(),
+            'api_url' => $client->get_api_url(),
+            'account' => $account,
+        ];
+    }
+
+    /**
      * Move legacy MDS3 core-owned ImageGrid settings into extension-owned options.
      *
      * @return void
      */
     private function migrate_mds3_core_settings() {
-        if (get_option('mds_imagegrid_migrated_mds3_core_settings')) {
-            return;
-        }
-
-        $settings = get_option('mds3_settings', []);
-        if (!is_array($settings)) {
-            update_option('mds_imagegrid_migrated_mds3_core_settings', MDS_IMAGEGRID_VERSION, false);
-            return;
-        }
-
         $map = [
             'imagegrid_api_url' => 'mds_imagegrid_api_url',
             'imagegrid_api_key' => 'mds_imagegrid_api_key',
@@ -172,11 +281,32 @@ class Main {
             'imagegrid_quota_processing_credits' => 'mds_imagegrid_quota_processing_credits',
         ];
 
+        $settings = get_option('mds3_settings', []);
+        if (!is_array($settings)) {
+            update_option('mds_imagegrid_migrated_mds3_core_settings', MDS_IMAGEGRID_VERSION, false);
+            return;
+        }
+
+        $has_core_keys = (bool) array_intersect(array_keys($map), array_keys($settings));
+        if (get_option('mds_imagegrid_migrated_mds3_core_settings') && !$has_core_keys) {
+            return;
+        }
+
+        $updated_settings = $settings;
         foreach ($map as $old_key => $new_key) {
             if (!array_key_exists($old_key, $settings) || '' === (string) $settings[$old_key]) {
+                unset($updated_settings[$old_key]);
                 continue;
             }
-            update_option($new_key, $settings[$old_key], false);
+
+            if ('' === (string) get_option($new_key, '')) {
+                update_option($new_key, $settings[$old_key], false);
+            }
+            unset($updated_settings[$old_key]);
+        }
+
+        if ($updated_settings !== $settings) {
+            update_option('mds3_settings', $updated_settings, false);
         }
 
         update_option('mds_imagegrid_migrated_mds3_core_settings', MDS_IMAGEGRID_VERSION, false);
@@ -340,6 +470,56 @@ class Main {
     }
 
     /**
+     * Poll an MDS3 ImageGrid render job and return a core-compatible update.
+     *
+     * @param mixed $result Existing filter result.
+     * @param array $job    MDS3 render job row.
+     * @return mixed
+     */
+    public function poll_mds3_render($result, array $job) {
+        if (null !== $result || !self::is_enabled()) {
+            return $result;
+        }
+
+        $job_id = sanitize_text_field((string) ($job['remote_job_id'] ?? ''));
+        if ('' === $job_id) {
+            return $result;
+        }
+
+        $response = $this->client()->get_job($job_id);
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $result_payload = is_array($response['result'] ?? null) ? $response['result'] : [];
+        $status = self::normalize_job_status($response['status'] ?? ($job['status'] ?? 'pending'));
+        $tileset_id = sanitize_text_field((string) ($result_payload['tileset_id'] ?? $response['tileset_id'] ?? ($job['remote_tileset_id'] ?? '')));
+        $grid_id = absint($job['grid_id'] ?? 0);
+
+        if ($grid_id) {
+            self::update_grid_state($grid_id, [
+                'job_id' => $response['id'] ?? $job_id,
+                'status' => $status,
+                'tileset_id' => $tileset_id,
+                'format' => $result_payload['format'] ?? 'png',
+                'tile_size' => $result_payload['tile_size'] ?? 256,
+                'min_level' => $result_payload['min_level'] ?? 0,
+                'max_level' => $result_payload['max_level'] ?? 0,
+                'total_tiles' => $result_payload['total_tiles'] ?? 0,
+                'last_error' => sanitize_text_field((string) ($response['error_message'] ?? '')),
+                'updated_at' => current_time('mysql'),
+            ]);
+        }
+
+        return [
+            'status' => $status,
+            'remote_tileset_id' => $tileset_id,
+            'result' => $response,
+            'error_message' => sanitize_text_field((string) ($response['error_message'] ?? '')),
+        ];
+    }
+
+    /**
      * Submit a grid render job.
      *
      * @param int                 $grid_id Grid ID.
@@ -477,6 +657,94 @@ class Main {
         $updated = array_merge($existing, $state);
 
         update_option(self::grid_state_option_name($grid_id), $updated, false);
+    }
+
+    /**
+     * Record a failed connection check in extension-owned options.
+     *
+     * @param string $message Failure message.
+     * @return void
+     */
+    private function record_connection_failure($message) {
+        update_option('mds_imagegrid_last_connection', [
+            'status' => 'failed',
+            'message' => sanitize_text_field((string) $message),
+            'checked_at' => current_time('mysql'),
+        ], false);
+    }
+
+    /**
+     * Return the customer-facing ImageGrid app URL.
+     *
+     * @return string
+     */
+    private function app_url() {
+        return function_exists(__NAMESPACE__ . '\\mds_imagegrid_app_url')
+            ? mds_imagegrid_app_url()
+            : 'https://imagegrid.dev';
+    }
+
+    /**
+     * Build a hosted connect URL for dashboard/account actions.
+     *
+     * @param string $mode Optional connect mode.
+     * @return string
+     */
+    private function connect_url($mode = '') {
+        $app_url = $this->app_url();
+        if (!$app_url) {
+            return '';
+        }
+
+        $return_url = add_query_arg(
+            [
+                'action' => 'mds_imagegrid_connect_return',
+                '_wpnonce' => wp_create_nonce('mds_imagegrid_connect_return'),
+            ],
+            admin_url('admin-post.php')
+        );
+
+        $args = [
+            'return_url' => rawurlencode($return_url),
+            'site_url' => home_url('/'),
+            'site_name' => get_bloginfo('name'),
+            'plugin' => 'mds-imagegrid',
+        ];
+        if ('' !== (string) $mode) {
+            $args['mode'] = sanitize_key((string) $mode);
+        }
+
+        return add_query_arg($args, $app_url . '/app/integrations/mds/connect');
+    }
+
+    /**
+     * Extract a readable account name from stored ImageGrid account data.
+     *
+     * @param array $account Stored account payload.
+     * @return string
+     */
+    private function account_display_name(array $account) {
+        $nested = is_array($account['account'] ?? null) ? $account['account'] : $account;
+
+        return sanitize_text_field((string) ($nested['display_name'] ?? $nested['name'] ?? $nested['slug'] ?? ''));
+    }
+
+    /**
+     * Extract usage data from stored ImageGrid account data.
+     *
+     * @param array $account Stored account payload.
+     * @return array
+     */
+    private function account_usage(array $account) {
+        if (is_array($account['usage'] ?? null)) {
+            return $account['usage'];
+        }
+
+        if (is_array($account['account']['usage'] ?? null)) {
+            return $account['account']['usage'];
+        }
+
+        return [];
     }
 
     /**
