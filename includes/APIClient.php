@@ -650,6 +650,31 @@ class API_Client {
     }
 
     /**
+     * Sanitize a submitted ImageGrid service URL.
+     *
+     * @param mixed $url Raw URL value.
+     * @return string
+     */
+    public static function sanitize_service_url($url) {
+        return untrailingslashit(esc_url_raw(trim((string) $url)));
+    }
+
+    /**
+     * Check whether a non-empty submitted service URL was invalid.
+     *
+     * Sanitization can turn hostile schemes such as javascript: into an empty
+     * string. Treat that as invalid input instead of silently saving blank.
+     *
+     * @param mixed  $raw_url       Raw submitted URL value.
+     * @param string $sanitized_url Sanitized URL value.
+     * @return bool
+     */
+    public static function has_invalid_service_url_submission($raw_url, $sanitized_url) {
+        return '' !== trim((string) $raw_url)
+            && ('' === (string) $sanitized_url || !self::is_allowed_url($sanitized_url));
+    }
+
+    /**
      * Check whether a string looks like a UUID.
      *
      * @param string $value Value to check.

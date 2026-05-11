@@ -117,6 +117,10 @@ function mds_imagegrid_missing_mds_notice() {
  */
 function mds_imagegrid_load_files() {
     require_once MDS_IMAGEGRID_PATH . 'includes/APIClient.php';
+    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/RendersImageGridAdminPanels.php';
+    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/ValidatesImageGridSettings.php';
+    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/HandlesImageGridAdminActions.php';
+    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/SupportsImageGridAdmin.php';
     require_once MDS_IMAGEGRID_PATH . 'includes/Admin.php';
     require_once MDS_IMAGEGRID_PATH . 'includes/Main.php';
 }
