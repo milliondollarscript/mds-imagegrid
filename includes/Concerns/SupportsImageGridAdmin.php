@@ -28,13 +28,7 @@ trait SupportsImageGridAdmin {
      * @return void
      */
     private static function grid_action_form($action, $nonce, $grid_id, $label, $class, $disabled) {
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
-        wp_nonce_field($nonce);
-        echo '<input type="hidden" name="action" value="' . esc_attr($action) . '">';
-        echo '<input type="hidden" name="grid_id" value="' . esc_attr(absint($grid_id)) . '">';
-        echo '<input type="hidden" name="redirect_to" value="grid">';
-        echo '<button type="submit" class="' . esc_attr($class) . '" ' . disabled($disabled, true, false) . '>' . esc_html($label) . '</button>';
-        echo '</form>';
+        include MDS_IMAGEGRID_PATH . 'templates/admin/partials/grid-action-form.php';
     }
 
     /**
@@ -45,7 +39,7 @@ trait SupportsImageGridAdmin {
      * @return void
      */
     private static function fact($label, $value) {
-        echo '<div><dt>' . esc_html($label) . '</dt><dd>' . esc_html((string) $value) . '</dd></div>';
+        include MDS_IMAGEGRID_PATH . 'templates/admin/partials/fact.php';
     }
 
     /**
@@ -59,8 +53,7 @@ trait SupportsImageGridAdmin {
      */
     private static function checkbox_field($name, $label, $checked, $description = '') {
         $field_id = sanitize_key((string) $name);
-        echo '<p class="mds3-field"><label for="' . esc_attr($field_id) . '"><span class="mds3-field-label-text">' . esc_html($label) . '</span></label>';
-        echo '<label class="mds3-checkbox-label"><input id="' . esc_attr($field_id) . '" type="checkbox" name="' . esc_attr($name) . '" value="1" ' . checked($checked, true, false) . ' /> ' . esc_html($description) . '</label></p>';
+        include MDS_IMAGEGRID_PATH . 'templates/admin/partials/checkbox-field.php';
     }
 
     /**
@@ -75,12 +68,7 @@ trait SupportsImageGridAdmin {
      * @return void
      */
     private static function input_field($name, $label, $type, $value, $description = '', $placeholder = '') {
-        echo '<p class="mds3-field"><label for="' . esc_attr($name) . '"><span class="mds3-field-label-text">' . esc_html($label) . '</span></label>';
-        echo '<input id="' . esc_attr($name) . '" type="' . esc_attr($type) . '" name="' . esc_attr($name) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($placeholder) . '" autocomplete="' . esc_attr('password' === $type ? 'new-password' : 'off') . '" />';
-        if ($description) {
-            echo '<span class="description">' . esc_html($description) . '</span>';
-        }
-        echo '</p>';
+        include MDS_IMAGEGRID_PATH . 'templates/admin/partials/input-field.php';
     }
 
     /**
