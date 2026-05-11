@@ -156,7 +156,7 @@ function mds_imagegrid_register_extension() {
         \MDS\Core\Extensions\Manager::register([
             'id'               => 'mds-imagegrid',
             'name'             => 'ImageGrid',
-            'description'      => 'Free connector for hosted ImageGrid rendering and tile delivery.',
+            'description'      => 'Free connector for hosted ImageGrid rendering.',
             'version'          => MDS_IMAGEGRID_VERSION,
             'author'           => 'Million Dollar Script',
             'url'              => 'https://milliondollarscript.com/extensions/imagegrid',
@@ -167,7 +167,7 @@ function mds_imagegrid_register_extension() {
                 'payment_gateway' => false,
                 'admin_pages'     => true,
                 'frontend_assets' => false,
-                'remote_tiles'    => true,
+                'remote_tiles'    => false,
                 'imagegrid'        => true,
             ],
             'init_callback'    => ['\\MDS\\Extensions\\ImageGrid\\Main', 'init'],

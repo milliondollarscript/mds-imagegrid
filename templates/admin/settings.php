@@ -33,7 +33,7 @@ $has_connection = $has_api_key || !empty($connection);
 <div class="wrap mds-imagegrid-wrap">
     <h1 class="wp-heading-inline"><?php esc_html_e('ImageGrid', 'mds-imagegrid'); ?></h1>
     <p class="mds-imagegrid-lede">
-        <?php esc_html_e('Connect Million Dollar Script zoomable grids to ImageGrid for remote rendering and authenticated tile delivery.', 'mds-imagegrid'); ?>
+        <?php esc_html_e('Connect Million Dollar Script zoomable grids to ImageGrid for hosted render jobs. Public delivery remains local unless the connected ImageGrid API key includes CDN access.', 'mds-imagegrid'); ?>
     </p>
 
     <?php if ($notice) : ?>
@@ -61,7 +61,7 @@ $has_connection = $has_api_key || !empty($connection);
                         <td>
                             <label>
                                 <input type="checkbox" name="mds_imagegrid_enabled" value="1" <?php checked($enabled); ?>>
-                                <?php esc_html_e('Serve ready remote tiles for grids that have an ImageGrid tileset.', 'mds-imagegrid'); ?>
+                                <?php esc_html_e('Allow Million Dollar Script to submit eligible large-grid render jobs to ImageGrid.', 'mds-imagegrid'); ?>
                             </label>
                         </td>
                     </tr>

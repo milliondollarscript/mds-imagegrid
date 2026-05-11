@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
             <p><?php echo esc_html($notice['message']); ?></p>
         </div>
     <?php endif; ?>
-    <p><?php esc_html_e('Submit this grid for hosted ImageGrid rendering and serve ready remote tiles through Million Dollar Script.', 'mds-imagegrid'); ?></p>
+    <p><?php esc_html_e('Submit this grid for hosted ImageGrid rendering. Public delivery remains local unless the connected ImageGrid API key includes CDN access.', 'mds-imagegrid'); ?></p>
 
     <?php if (!$enabled || !$has_api_key) : ?>
         <p class="description"><?php esc_html_e('Enable ImageGrid and save an API key in Settings before submitting render jobs.', 'mds-imagegrid'); ?></p>

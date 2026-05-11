@@ -69,8 +69,6 @@ class Main {
             Admin::init();
         }
 
-        add_filter('mds_grid_remote_tile_request', [$this, 'get_remote_tile_request'], 10, 5);
-        add_filter('mds_grid_has_remote_tiles', [$this, 'has_remote_tiles'], 10, 2);
         add_filter('mds3_imagegrid_api_url', [$this, 'filter_mds3_api_url']);
         add_filter('mds3_imagegrid_api_key', [$this, 'filter_mds3_api_key']);
         add_filter('mds3_imagegrid_quota', [$this, 'filter_mds3_quota']);
@@ -310,56 +308,6 @@ class Main {
         }
 
         update_option('mds_imagegrid_migrated_mds3_core_settings', MDS_IMAGEGRID_VERSION, false);
-    }
-
-    /**
-     * Report whether ImageGrid has a completed remote tileset for a grid.
-     *
-     * @param bool $has_tiles Existing result.
-     * @param int  $grid_id   Grid ID.
-     * @return bool
-     */
-    public function has_remote_tiles($has_tiles, $grid_id) {
-        if ($has_tiles || !self::is_enabled()) {
-            return (bool) $has_tiles;
-        }
-
-        $state = self::get_grid_state($grid_id);
-
-        return !empty($state['tileset_id']) && 'ready' === ($state['status'] ?? '');
-    }
-
-    /**
-     * Return a server-side remote tile request for a ready grid.
-     *
-     * @param mixed $request Existing request value.
-     * @param int   $grid_id Grid ID.
-     * @param int   $z       Zoom level.
-     * @param int   $x       Tile x coordinate.
-     * @param int   $y       Tile y coordinate.
-     * @return mixed
-     */
-    public function get_remote_tile_request($request, $grid_id, $z, $x, $y) {
-        if ($request || !self::is_enabled()) {
-            return $request;
-        }
-
-        $state = self::get_grid_state($grid_id);
-        $tileset_id = $state['tileset_id'] ?? '';
-
-        if (!$tileset_id || 'ready' !== ($state['status'] ?? '')) {
-            return $request;
-        }
-
-        $tile_request = $this->client()->get_tileset_tile_request(
-            $tileset_id,
-            absint($z),
-            absint($x),
-            absint($y),
-            $state['format'] ?? 'png'
-        );
-
-        return is_wp_error($tile_request) ? $request : $tile_request;
     }
 
     /**
