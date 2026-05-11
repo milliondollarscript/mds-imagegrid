@@ -21,7 +21,7 @@
  * MDS Requires Service: yes
  * MDS Setup Category: rendering
  * MDS Minimum Security Level: api_key_write
- * MDS API Manifest: https://imagegrid.dev/api/openapi.json
+ * MDS API Manifest: https://imagegrid.dev/docs/openapi.json
  * MDS LLM Safe Actions: read_account read_render_status submit_render
  *
  * @package MDS\Extensions\ImageGrid

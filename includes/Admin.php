@@ -97,7 +97,7 @@ class Admin {
     }
 
     /**
-     * Add ImageGrid to the internal MDS3 dashboard menu without crowding the WordPress sidebar.
+     * Add ImageGrid to the internal MDS3 manage menu without crowding the WordPress sidebar.
      *
      * @param array $groups Existing dashboard menu groups.
      * @return array
@@ -107,18 +107,18 @@ class Admin {
             return $groups;
         }
 
-        if (!isset($groups['extend']) || !is_array($groups['extend'])) {
-            $groups['extend'] = [
-                'label' => __('Extend', 'mds-imagegrid'),
+        if (!isset($groups['manage']) || !is_array($groups['manage'])) {
+            $groups['manage'] = [
+                'label' => __('Manage', 'mds-imagegrid'),
                 'items' => [],
             ];
         }
 
-        if (empty($groups['extend']['items']) || !is_array($groups['extend']['items'])) {
-            $groups['extend']['items'] = [];
+        if (empty($groups['manage']['items']) || !is_array($groups['manage']['items'])) {
+            $groups['manage']['items'] = [];
         }
 
-        $groups['extend']['items'][] = [
+        $groups['manage']['items'][] = [
             'label' => __('ImageGrid', 'mds-imagegrid'),
             'url' => admin_url('admin.php?page=mds3-imagegrid'),
             'icon' => 'dashicons-format-image',

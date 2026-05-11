@@ -453,6 +453,11 @@ class Main {
                 'operation' => $response['operation'] ?? 'mds_grid_composition',
                 'tileset_id' => $tileset_id,
                 'format' => $result_payload['format'] ?? 'png',
+                'manifest' => self::compact_manifest_state($manifest),
+                'patch_job_id' => '',
+                'patch_queue' => [],
+                'patch_queue_prepared' => false,
+                'patch_complete' => false,
                 'preflight' => $preflight,
                 'submitted_at' => current_time('mysql'),
                 'updated_at' => current_time('mysql'),
@@ -486,6 +491,14 @@ class Main {
             return $result;
         }
 
+        $grid_id = absint($job['grid_id'] ?? 0);
+        if ($grid_id) {
+            $state = self::get_grid_state($grid_id);
+            if (!empty($state['patch_job_id'])) {
+                return $this->poll_manifest_patch_job($job, $state);
+            }
+        }
+
         $response = $this->client()->get_job($job_id);
         if (is_wp_error($response)) {
             return $response;
@@ -494,7 +507,13 @@ class Main {
         $result_payload = is_array($response['result'] ?? null) ? $response['result'] : [];
         $status = self::normalize_job_status($response['status'] ?? ($job['status'] ?? 'pending'));
         $tileset_id = sanitize_text_field((string) ($result_payload['tileset_id'] ?? $response['tileset_id'] ?? ($job['remote_tileset_id'] ?? '')));
-        $grid_id = absint($job['grid_id'] ?? 0);
+
+        if ($grid_id && 'ready' === $status && $tileset_id) {
+            $state = self::get_grid_state($grid_id);
+            if (self::state_has_manifest_assets($state) && empty($state['patch_complete'])) {
+                return $this->start_manifest_patch_queue($grid_id, $tileset_id, $state);
+            }
+        }
 
         if ($grid_id) {
             self::update_grid_state($grid_id, [
@@ -516,6 +535,185 @@ class Main {
             'remote_tileset_id' => $tileset_id,
             'result' => $response,
             'error_message' => sanitize_text_field((string) ($response['error_message'] ?? '')),
+        ];
+    }
+
+    /**
+     * Poll an active tile_patch job in the MDS3 manifest workflow.
+     *
+     * @param array $job   Core render job row.
+     * @param array $state Extension grid state.
+     * @return array|\WP_Error
+     */
+    private function poll_manifest_patch_job(array $job, array $state) {
+        $grid_id = absint($job['grid_id'] ?? 0);
+        $patch_job_id = sanitize_text_field((string) ($state['patch_job_id'] ?? ''));
+        if (!$grid_id || !$patch_job_id) {
+            return $job;
+        }
+
+        $response = $this->client()->get_job($patch_job_id);
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $result_payload = is_array($response['result'] ?? null) ? $response['result'] : [];
+        $status = self::normalize_job_status($response['status'] ?? ($state['status'] ?? 'pending'));
+        $tileset_id = sanitize_text_field((string) ($result_payload['tileset_id'] ?? ($state['tileset_id'] ?? '')));
+
+        if ('ready' === $status && $tileset_id) {
+            $queue = is_array($state['patch_queue'] ?? null) ? $state['patch_queue'] : [];
+            if ($queue) {
+                $state['patch_job_id'] = '';
+                $state['tileset_id'] = $tileset_id;
+                $state['status'] = 'pending';
+
+                return $this->start_manifest_patch_queue($grid_id, $tileset_id, $state);
+            }
+
+            self::update_grid_state($grid_id, [
+                'patch_job_id' => '',
+                'patch_complete' => true,
+                'status' => 'ready',
+                'tileset_id' => $tileset_id,
+                'format' => $result_payload['format'] ?? ($state['format'] ?? 'png'),
+                'tile_size' => $result_payload['tile_size'] ?? ($state['tile_size'] ?? 256),
+                'min_level' => $result_payload['min_level'] ?? ($state['min_level'] ?? 0),
+                'max_level' => $result_payload['max_level'] ?? ($state['max_level'] ?? 0),
+                'total_tiles' => $result_payload['total_tiles'] ?? ($state['total_tiles'] ?? 0),
+                'last_error' => '',
+                'updated_at' => current_time('mysql'),
+            ]);
+
+            return [
+                'status' => 'ready',
+                'remote_tileset_id' => $tileset_id,
+                'result' => $response,
+                'error_message' => '',
+            ];
+        }
+
+        if ('failed' === $status) {
+            $message = sanitize_text_field((string) ($response['error_message'] ?? __('ImageGrid tile patch failed.', 'mds-imagegrid')));
+            self::update_grid_state($grid_id, [
+                'status' => 'failed',
+                'last_error' => $message,
+                'updated_at' => current_time('mysql'),
+            ]);
+
+            return [
+                'status' => 'failed',
+                'remote_tileset_id' => '',
+                'result' => $response,
+                'error_message' => $message,
+            ];
+        }
+
+        self::update_grid_state($grid_id, [
+            'status' => $status,
+            'updated_at' => current_time('mysql'),
+        ]);
+
+        return [
+            'status' => $status,
+            'remote_tileset_id' => '',
+            'result' => $response,
+            'error_message' => '',
+        ];
+    }
+
+    /**
+     * Start or continue the manifest asset patch queue.
+     *
+     * @param int    $grid_id    Grid ID.
+     * @param string $tileset_id Current ImageGrid tileset UUID.
+     * @param array  $state      Extension grid state.
+     * @return array|\WP_Error
+     */
+    private function start_manifest_patch_queue($grid_id, $tileset_id, array $state) {
+        $grid_id = absint($grid_id);
+        $tileset_id = sanitize_text_field((string) $tileset_id);
+        $queue = is_array($state['patch_queue'] ?? null) ? $state['patch_queue'] : [];
+
+        if (empty($state['patch_queue_prepared'])) {
+            $manifest = is_array($state['manifest'] ?? null) ? $state['manifest'] : [];
+            $queue = $this->client()->prepare_manifest_asset_patches($manifest);
+            if (is_wp_error($queue)) {
+                $message = $queue->get_error_message();
+                self::update_grid_state($grid_id, [
+                    'status' => 'failed',
+                    'last_error' => $message,
+                    'updated_at' => current_time('mysql'),
+                ]);
+
+                return [
+                    'status' => 'failed',
+                    'remote_tileset_id' => '',
+                    'result' => ['error' => $message],
+                    'error_message' => $message,
+                ];
+            }
+        }
+
+        if (!$queue) {
+            self::update_grid_state($grid_id, [
+                'patch_job_id' => '',
+                'patch_queue' => [],
+                'patch_queue_prepared' => true,
+                'patch_complete' => true,
+                'status' => 'ready',
+                'tileset_id' => $tileset_id,
+                'updated_at' => current_time('mysql'),
+            ]);
+
+            return [
+                'status' => 'ready',
+                'remote_tileset_id' => $tileset_id,
+                'result' => ['tileset_id' => $tileset_id, 'patches' => 0],
+                'error_message' => '',
+            ];
+        }
+
+        $patch = array_shift($queue);
+        $response = $this->client()->create_tile_patch_job($tileset_id, [$patch]);
+        if (is_wp_error($response)) {
+            $message = $response->get_error_message();
+            self::update_grid_state($grid_id, [
+                'status' => 'failed',
+                'last_error' => $message,
+                'updated_at' => current_time('mysql'),
+            ]);
+
+            return [
+                'status' => 'failed',
+                'remote_tileset_id' => '',
+                'result' => ['error' => $message],
+                'error_message' => $message,
+            ];
+        }
+
+        $patch_job_id = sanitize_text_field((string) ($response['id'] ?? $response['job_id'] ?? ''));
+        $status = self::normalize_job_status($response['status'] ?? 'pending');
+        self::update_grid_state($grid_id, [
+            'base_tileset_id' => $state['base_tileset_id'] ?? $tileset_id,
+            'patch_job_id' => $patch_job_id,
+            'patch_queue' => $queue,
+            'patch_queue_prepared' => true,
+            'patch_complete' => false,
+            'status' => $status,
+            'tileset_id' => '',
+            'updated_at' => current_time('mysql'),
+            'last_error' => '',
+        ]);
+
+        return [
+            'status' => $status,
+            'remote_tileset_id' => '',
+            'result' => [
+                'patch_job' => $response,
+                'remaining_patches' => count($queue),
+            ],
+            'error_message' => '',
         ];
     }
 
@@ -630,6 +828,53 @@ class Main {
         ]);
 
         return $response;
+    }
+
+    /**
+     * Keep only the manifest fields needed for deferred tile_patch jobs.
+     *
+     * @param array $manifest Raw MDS3 manifest.
+     * @return array
+     */
+    private static function compact_manifest_state(array $manifest) {
+        $assets = [];
+        foreach ((array) ($manifest['assets'] ?? []) as $asset) {
+            if (!is_array($asset)) {
+                continue;
+            }
+
+            $assets[] = [
+                'placement_id' => absint($asset['placement_id'] ?? 0),
+                'attachment_id' => absint($asset['attachment_id'] ?? 0),
+                'x' => absint($asset['x'] ?? 0),
+                'y' => absint($asset['y'] ?? 0),
+                'width' => absint($asset['width'] ?? 0),
+                'height' => absint($asset['height'] ?? 0),
+                'fit_mode' => sanitize_key((string) ($asset['fit_mode'] ?? 'cover')),
+            ];
+        }
+
+        return [
+            'grid' => [
+                'id' => absint($manifest['grid']['id'] ?? 0),
+                'width' => absint($manifest['grid']['width'] ?? 0),
+                'height' => absint($manifest['grid']['height'] ?? 0),
+                'block_width' => absint($manifest['grid']['block_width'] ?? 0),
+                'block_height' => absint($manifest['grid']['block_height'] ?? 0),
+            ],
+            'tile_size' => absint($manifest['tile_size'] ?? 256),
+            'assets' => $assets,
+        ];
+    }
+
+    /**
+     * Check whether stored state contains deferred placement assets.
+     *
+     * @param array $state Extension grid state.
+     * @return bool
+     */
+    private static function state_has_manifest_assets(array $state) {
+        return !empty($state['manifest']['assets']) && is_array($state['manifest']['assets']);
     }
 
     /**

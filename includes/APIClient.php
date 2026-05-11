@@ -195,6 +195,66 @@ class API_Client {
     }
 
     /**
+     * Build ImageGrid tile_patch entries from MDS3 placement assets.
+     *
+     * @param array $manifest MDS3 render manifest.
+     * @return array|\WP_Error
+     */
+    public function prepare_manifest_asset_patches(array $manifest) {
+        $assets = is_array($manifest['assets'] ?? null) ? $manifest['assets'] : [];
+        $patches = [];
+
+        foreach ($assets as $asset) {
+            if (!is_array($asset)) {
+                continue;
+            }
+
+            $patch = $this->manifest_asset_patch($asset);
+            if (is_wp_error($patch)) {
+                return $patch;
+            }
+            if ($patch) {
+                $patches[] = $patch;
+            }
+        }
+
+        return $patches;
+    }
+
+    /**
+     * Create a tile_patch job for one or more prepared patches.
+     *
+     * @param string $tileset_id Existing ImageGrid tileset UUID.
+     * @param array  $patches    Prepared tile_patch entries.
+     * @return array|\WP_Error
+     */
+    public function create_tile_patch_job($tileset_id, array $patches) {
+        $tileset_id = sanitize_text_field((string) $tileset_id);
+        if (!$this->looks_like_uuid($tileset_id)) {
+            return new \WP_Error('mds_imagegrid_invalid_tileset_id', __('Invalid ImageGrid tileset ID.', 'mds-imagegrid'));
+        }
+
+        $prepared = [];
+        foreach ($patches as $patch) {
+            if (is_array($patch)) {
+                $prepared[] = $patch;
+            }
+        }
+
+        if (!$prepared) {
+            return new \WP_Error('mds_imagegrid_missing_patches', __('No ImageGrid patches were prepared.', 'mds-imagegrid'));
+        }
+
+        return $this->request_json('POST', '/v1/jobs', [
+            'operation' => 'tile_patch',
+            'options' => [
+                'tileset_id' => $tileset_id,
+                'patches' => $prepared,
+            ],
+        ]);
+    }
+
+    /**
      * Fetch a job by ID.
      *
      * @param string $job_id Job UUID.
@@ -495,6 +555,168 @@ class API_Client {
         }
 
         return $placements;
+    }
+
+    /**
+     * Build one asset patch from a manifest placement.
+     *
+     * @param array $asset Manifest asset.
+     * @return array|\WP_Error|null
+     */
+    private function manifest_asset_patch(array $asset) {
+        $attachment_id = absint($asset['attachment_id'] ?? 0);
+        $file_path = $attachment_id ? (string) get_attached_file($attachment_id) : '';
+        if ('' === $file_path) {
+            return new \WP_Error('mds_imagegrid_missing_attachment_file', __('A placement source file is unavailable for ImageGrid upload.', 'mds-imagegrid'));
+        }
+
+        $upload = $this->upload_asset_file($file_path);
+        if (is_wp_error($upload)) {
+            return $upload;
+        }
+
+        $asset_id = sanitize_text_field((string) ($upload['id'] ?? ''));
+        if (!$this->looks_like_uuid($asset_id)) {
+            return new \WP_Error('mds_imagegrid_asset_upload_missing_id', __('ImageGrid did not return a valid asset ID.', 'mds-imagegrid'));
+        }
+
+        $width = max(1, absint($asset['width'] ?? 0));
+        $height = max(1, absint($asset['height'] ?? 0));
+        if (!$width || !$height) {
+            return null;
+        }
+
+        return [
+            'type' => 'asset',
+            'asset_id' => $asset_id,
+            'x' => absint($asset['x'] ?? 0),
+            'y' => absint($asset['y'] ?? 0),
+            'width' => $width,
+            'height' => $height,
+            'fit' => $this->normalize_fit_mode($asset['fit_mode'] ?? 'cover'),
+        ];
+    }
+
+    /**
+     * Upload an attachment file to ImageGrid.
+     *
+     * @param string $file_path Absolute file path.
+     * @return array|\WP_Error
+     */
+    private function upload_asset_file($file_path) {
+        if (!function_exists('curl_init')) {
+            return new \WP_Error('mds_imagegrid_curl_missing', __('The PHP cURL extension is required to upload ImageGrid assets.', 'mds-imagegrid'));
+        }
+
+        if ('' === $this->api_key) {
+            return new \WP_Error('mds_imagegrid_missing_api_key', __('Enter an ImageGrid API key before connecting.', 'mds-imagegrid'));
+        }
+
+        $file_path = $this->validated_upload_path($file_path);
+        if (is_wp_error($file_path)) {
+            return $file_path;
+        }
+
+        $url = $this->build_url('/v1/assets');
+        if (!$url) {
+            return new \WP_Error('mds_imagegrid_invalid_api_url', __('The ImageGrid URL is invalid.', 'mds-imagegrid'));
+        }
+
+        $mime_type = function_exists('mime_content_type') ? (string) mime_content_type($file_path) : '';
+        if ('' === $mime_type || 'application/octet-stream' === $mime_type) {
+            $filetype = wp_check_filetype(basename($file_path));
+            $mime_type = (string) ($filetype['type'] ?? 'application/octet-stream');
+        }
+
+        $headers = [
+            'Accept: application/json',
+            'Authorization: Bearer ' . $this->api_key,
+            'X-API-Key: ' . $this->api_key,
+            'X-Site-URL: ' . home_url(),
+            'User-Agent: MDS-ImageGrid/' . MDS_IMAGEGRID_VERSION . ' WordPress/' . get_bloginfo('version'),
+        ];
+
+        foreach ($this->host_header() as $key => $value) {
+            $headers[] = $key . ': ' . $value;
+        }
+
+        $handle = curl_init($url);
+        curl_setopt_array($handle, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 60,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => [
+                'file' => new \CURLFile($file_path, $mime_type ?: 'application/octet-stream', basename($file_path)),
+            ],
+        ]);
+
+        $body = curl_exec($handle);
+        $error = curl_error($handle);
+        $code = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        curl_close($handle);
+
+        if (false === $body) {
+            return new \WP_Error('mds_imagegrid_upload_failed', $error ?: __('ImageGrid asset upload failed.', 'mds-imagegrid'));
+        }
+
+        $decoded = json_decode((string) $body, true);
+        $decoded = is_array($decoded) ? $decoded : [];
+        if ($code < 200 || $code >= 300) {
+            $message = sanitize_text_field((string) ($decoded['error'] ?? $decoded['message'] ?? ''));
+            return new \WP_Error('mds_imagegrid_upload_http_error', $message ?: sprintf(__('ImageGrid upload returned HTTP %d.', 'mds-imagegrid'), $code), [
+                'status' => $code,
+                'body' => $decoded ?: (string) $body,
+            ]);
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Confirm a source path is a readable WordPress uploads file.
+     *
+     * @param string $file_path Raw file path.
+     * @return string|\WP_Error
+     */
+    private function validated_upload_path($file_path) {
+        $real_path = realpath((string) $file_path);
+        if (!$real_path || !is_readable($real_path) || !is_file($real_path)) {
+            return new \WP_Error('mds_imagegrid_attachment_file_unreadable', __('A placement source file cannot be read for ImageGrid upload.', 'mds-imagegrid'));
+        }
+
+        $uploads = wp_get_upload_dir();
+        $base = realpath((string) ($uploads['basedir'] ?? ''));
+        if (!$base) {
+            return new \WP_Error('mds_imagegrid_upload_base_unavailable', __('WordPress uploads directory is unavailable.', 'mds-imagegrid'));
+        }
+
+        $prefix = trailingslashit($base);
+        if ($real_path !== $base && 0 !== strpos($real_path, $prefix)) {
+            return new \WP_Error('mds_imagegrid_attachment_file_disallowed', __('ImageGrid can upload only files from the WordPress uploads directory.', 'mds-imagegrid'));
+        }
+
+        return $real_path;
+    }
+
+    /**
+     * Normalize MDS placement fit modes to ImageGrid fit modes.
+     *
+     * @param mixed $fit_mode Raw fit mode.
+     * @return string
+     */
+    private function normalize_fit_mode($fit_mode) {
+        $fit_mode = sanitize_key((string) $fit_mode);
+        $map = [
+            'contain' => 'contain',
+            'cover' => 'cover',
+            'fill' => 'fill',
+            'inside' => 'inside',
+            'outside' => 'outside',
+            'stretch' => 'fill',
+        ];
+
+        return $map[$fit_mode] ?? 'cover';
     }
 
     /**
