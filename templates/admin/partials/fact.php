@@ -2,7 +2,7 @@
 /**
  * ImageGrid facts-list item.
  *
- * @package MDS\Extensions\ImageGrid
+ * @package MillionDollarScript\Extensions\ImageGrid
  */
 
 if (!defined('ABSPATH')) {

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "package": "mds-imagegrid",
+  "type": "extension",
+  "version": "1.0.8",
+  "channel": "main",
+  "title": "ImageGrid Rendering",
+  "docs": [
+    {
+      "id": "usage",
+      "title": "ImageGrid Rendering",
+      "file": "USAGE.md",
+      "audience": ["admin", "support", "developer"],
+      "topics": ["imagegrid", "rendering", "performance", "uploads"]
+    }
+  ]
+}

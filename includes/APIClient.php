@@ -2,13 +2,13 @@
 /**
  * ImageGrid client.
  *
- * @package MDS\Extensions\ImageGrid
+ * @package MillionDollarScript\Extensions\ImageGrid
  */
 
-namespace MDS\Extensions\ImageGrid;
+namespace MillionDollarScript\Extensions\ImageGrid;
 
-use MDS\Media\OriginalAttachmentResolver;
-use MDS\Rendering\RenderEstimate;
+use MillionDollarScript\Media\OriginalAttachmentResolver;
+use MillionDollarScript\Rendering\Estimate;
 
 if (!defined('ABSPATH')) {
     exit;
@@ -121,35 +121,25 @@ class API_Client {
     /**
      * Preflight a grid composition render.
      *
-     * @param \MDS\Core\Grid $grid    Grid object.
+     * @param \MillionDollarScript\Core\Grid $grid Grid object.
      * @param array          $options Additional ImageGrid options.
      * @return array|\WP_Error
      */
     public function preflight_grid_render($grid, array $options = []) {
         $render_options = $this->build_grid_render_options($grid, $options);
-        $payload = [
-            'operation' => 'grid_render',
-            'options'   => $render_options,
-            'estimate'  => $this->estimate_grid_render($grid, $render_options),
+
+        return [
+            'ok' => true,
+            'skipped' => true,
+            'reason' => 'job_endpoint_validates_limits',
+            'estimate' => $this->estimate_grid_render($grid, $render_options),
         ];
-
-        $response = $this->request_json('POST', '/v1/renders/preflight', $payload);
-        if (is_wp_error($response) && in_array((int) ($response->get_error_data()['status'] ?? 0), [404, 405], true)) {
-            return [
-                'ok' => true,
-                'skipped' => true,
-                'reason' => 'preflight_endpoint_unavailable',
-                'estimate' => $payload['estimate'],
-            ];
-        }
-
-        return $response;
     }
 
     /**
      * Create a grid composition render job.
      *
-     * @param \MDS\Core\Grid $grid    Grid object.
+     * @param \MillionDollarScript\Core\Grid $grid Grid object.
      * @param array          $options Additional ImageGrid options.
      * @return array|\WP_Error
      */
@@ -185,6 +175,8 @@ class API_Client {
             'format' => 'png',
             'strategy' => 'deepzoom',
         ];
+        $options['min_level'] = 0;
+        $options['max_level'] = $this->max_level_for_size($options['width'], $options['height']);
 
         $payload = [
             'operation' => 'grid_render',
@@ -307,6 +299,7 @@ class API_Client {
             )),
             'headers'  => array_merge($this->auth_headers(), $this->host_header()),
             'timeout'  => 20,
+            'redirection' => 0,
             'cache_ttl' => DAY_IN_SECONDS,
         ];
     }
@@ -335,7 +328,8 @@ class API_Client {
         $args = [
             'method'      => $method,
             'timeout'     => 45,
-            'redirection' => 2,
+            'redirection' => 0,
+            'reject_unsafe_urls' => !self::is_local_service_url($url),
             'headers'     => [
                 'Accept'       => 'application/json',
                 'Content-Type' => 'application/json',
@@ -356,7 +350,9 @@ class API_Client {
             $args['body'] = wp_json_encode($payload);
         }
 
-        $response = wp_remote_request($url, $args);
+        $response = self::is_local_service_url($url)
+            ? wp_remote_request($url, $args)
+            : wp_safe_remote_request($url, $args);
 
         if (is_wp_error($response)) {
             return $response;
@@ -383,21 +379,13 @@ class API_Client {
         }
 
         if ($code < 200 || $code >= 300) {
-            $message = '';
-            if (is_array($decoded)) {
-                $message = sanitize_text_field((string) ($decoded['error'] ?? $decoded['message'] ?? ''));
-            }
-            if ('' === $message && '' !== $body) {
-                $message = sanitize_text_field(wp_strip_all_tags($body));
-            }
-            if ('' === $message) {
-                $message = sprintf(__('ImageGrid returned HTTP %d.', 'mds-imagegrid'), $code);
-            }
-
-            return new \WP_Error('mds_imagegrid_http_error', $message, [
-                'status' => $code,
-                'body'   => is_array($decoded) ? $decoded : $body,
-            ]);
+            return $this->response_error(
+                $code,
+                is_array($decoded) ? $decoded : [],
+                $body,
+                'mds_imagegrid_http_error',
+                sprintf(__('ImageGrid returned HTTP %d.', 'mds-imagegrid'), $code)
+            );
         }
 
         return is_array($decoded) ? $decoded : [];
@@ -406,7 +394,7 @@ class API_Client {
     /**
      * Build grid composition render options from an MDS grid.
      *
-     * @param \MDS\Core\Grid $grid    Grid object.
+     * @param \MillionDollarScript\Core\Grid $grid Grid object.
      * @param array          $options Additional options.
      * @return array
      */
@@ -415,7 +403,7 @@ class API_Client {
         $grid_id = absint($grid_data['id']);
         $settings = is_array($grid_data['settings'] ?? null) ? $grid_data['settings'] : [];
         $option_getter = function($key, $default) {
-            return function_exists('mds_get_option') ? mds_get_option($key, $default) : $default;
+            return \MillionDollarScript\Core\Settings::get((string) $key, $default);
         };
         $background = $settings['background_color'] ?? (get_post_meta($grid_id, '_mds_grid_background_color', true) ?: $option_getter('mds_grid_background_color', '#ffffff'));
         $line_color = get_post_meta($grid_id, '_mds_grid_line_color', true) ?: $option_getter('mds_grid_line_color', '#999999');
@@ -442,18 +430,38 @@ class API_Client {
             'strategy'         => 'deepzoom',
         ];
 
-        $max_zoom = absint(get_option('mds_max_zoom_level', 5));
-        $min_zoom = absint(get_option('mds_min_zoom_level', 0));
-        $default_options['min_level'] = min($min_zoom, $max_zoom);
-        $default_options['max_level'] = max($min_zoom, $max_zoom);
+        $default_options['min_level'] = 0;
+        $default_options['max_level'] = $this->max_level_for_size(
+            $default_options['width'],
+            $default_options['height']
+        );
 
         return array_merge($default_options, $options);
     }
 
     /**
+     * Compute the full-resolution level used by a standard Deep Zoom pyramid.
+     *
+     * @param int $width  Grid width in pixels.
+     * @param int $height Grid height in pixels.
+     * @return int
+     */
+    private function max_level_for_size($width, $height) {
+        $width = max(1, absint($width));
+        $height = max(1, absint($height));
+        $max_dimension = max($width, $height);
+
+        if ($max_dimension <= 1) {
+            return 0;
+        }
+
+        return max(0, (int) ceil(log($max_dimension, 2)));
+    }
+
+    /**
      * Estimate a render for quota preflight.
      *
-     * @param \MDS\Core\Grid $grid    Grid object.
+     * @param \MillionDollarScript\Core\Grid $grid Grid object.
      * @param array          $options Render options.
      * @return array
      */
@@ -469,8 +477,8 @@ class API_Client {
             }
         }
 
-        if (class_exists(RenderEstimate::class)) {
-            return RenderEstimate::for_grid(
+        if (class_exists(Estimate::class)) {
+            return Estimate::grid(
                 [
                     'width' => max(1, absint($grid_data['width'])),
                     'height' => max(1, absint($grid_data['height'])),
@@ -641,15 +649,21 @@ class API_Client {
         }
 
         $handle = curl_init($url);
-        curl_setopt_array($handle, [
+        $curl_options = [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 60,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_MAXREDIRS => 0,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_POSTFIELDS => [
                 'file' => new \CURLFile($file_path, $mime_type ?: 'application/octet-stream', basename($file_path)),
             ],
-        ]);
+        ];
+        if (defined('CURLOPT_PROTOCOLS') && defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
+            $curl_options[CURLOPT_PROTOCOLS] = CURLPROTO_HTTP | CURLPROTO_HTTPS;
+        }
+        curl_setopt_array($handle, $curl_options);
 
         $body = curl_exec($handle);
         $error = curl_error($handle);
@@ -663,14 +677,92 @@ class API_Client {
         $decoded = json_decode((string) $body, true);
         $decoded = is_array($decoded) ? $decoded : [];
         if ($code < 200 || $code >= 300) {
-            $message = sanitize_text_field((string) ($decoded['error'] ?? $decoded['message'] ?? ''));
-            return new \WP_Error('mds_imagegrid_upload_http_error', $message ?: sprintf(__('ImageGrid upload returned HTTP %d.', 'mds-imagegrid'), $code), [
-                'status' => $code,
-                'body' => $decoded ?: (string) $body,
-            ]);
+            return $this->response_error(
+                $code,
+                $decoded,
+                (string) $body,
+                'mds_imagegrid_upload_http_error',
+                sprintf(__('ImageGrid upload returned HTTP %d.', 'mds-imagegrid'), $code)
+            );
         }
 
         return $decoded;
+    }
+
+    /**
+     * Convert a service error response into an actionable WordPress error.
+     *
+     * ImageGrid added stable error codes after the first connector release.
+     * Retaining text fallbacks keeps the client compatible with older and
+     * self-hosted service versions.
+     *
+     * @param int    $status        HTTP status.
+     * @param array  $decoded       Decoded response body.
+     * @param string $raw_body      Raw response body.
+     * @param string $fallback_code WordPress fallback error code.
+     * @param string $fallback      Fallback message.
+     * @return \WP_Error
+     */
+    private function response_error($status, array $decoded, $raw_body, $fallback_code, $fallback) {
+        $service_code = sanitize_key((string) ($decoded['code'] ?? ''));
+        if ('' === $service_code && 'quota exceeded' === strtolower(trim((string) ($decoded['error'] ?? '')))) {
+            $service_code = 'quota_exceeded';
+        }
+        $message = $this->service_error_message($service_code, $decoded, (int) $status);
+
+        if ('' === $message) {
+            $message = sanitize_text_field((string) ($decoded['error'] ?? $decoded['message'] ?? ''));
+        }
+        if ('' === $message && '' !== (string) $raw_body) {
+            $message = sanitize_text_field(wp_strip_all_tags((string) $raw_body));
+        }
+        if ('' === $message) {
+            $message = $fallback;
+        }
+
+        $error_code = $service_code ? 'mds_imagegrid_service_' . $service_code : $fallback_code;
+
+        return new \WP_Error($error_code, $message, [
+            'status' => (int) $status,
+            'service_code' => $service_code,
+            'body' => $decoded ?: (string) $raw_body,
+        ]);
+    }
+
+    /**
+     * Return customer-facing guidance for current ImageGrid service codes.
+     *
+     * @param string $code    Service error code.
+     * @param array  $payload Decoded response body.
+     * @param int    $status  HTTP status.
+     * @return string
+     */
+    private function service_error_message($code, array $payload, $status) {
+        switch ($code) {
+            case 'billing_action_required':
+                return __('ImageGrid billing needs attention. Review the connected ImageGrid account to restore rendering access.', 'mds-imagegrid');
+            case 'plan_required':
+                return __('An active ImageGrid plan is required before this account can process render jobs.', 'mds-imagegrid');
+            case 'account_unavailable':
+                return __('This ImageGrid account is unavailable. Review the account status or connect a different account.', 'mds-imagegrid');
+            case 'plan_policy_unavailable':
+                return __('ImageGrid could not verify the account plan. Try again shortly or review the connected account.', 'mds-imagegrid');
+            case 'quota_exceeded':
+                $quota_key = sanitize_key((string) ($payload['quota_key'] ?? ''));
+                return $quota_key
+                    ? sprintf(__('The ImageGrid account quota for %s has been reached.', 'mds-imagegrid'), str_replace('_', ' ', $quota_key))
+                    : __('An ImageGrid account quota has been reached. Review usage before submitting another render job.', 'mds-imagegrid');
+            case 'worker_capacity_exceeded':
+                return __('This render exceeds ImageGrid\'s current processing capacity. Reduce the grid size or try again after capacity becomes available.', 'mds-imagegrid');
+            case 'quota_policy_failed':
+                return __('ImageGrid could not verify the account limits for this render. Try again shortly before resubmitting the job.', 'mds-imagegrid');
+        }
+
+        if (401 === (int) $status) {
+            return __('ImageGrid authorization is required. Connect or verify the saved ImageGrid API key.', 'mds-imagegrid');
+        }
+
+        return '';
     }
 
     /**
@@ -755,8 +847,8 @@ class API_Client {
      * @return object|null
      */
     private function source_resolver() {
-        if (class_exists('\\MDS3\\Media\\OriginalImage')) {
-            return new \MDS3\Media\OriginalImage();
+        if (class_exists('\\MillionDollarScript\\Media\\OriginalImage')) {
+            return new \MillionDollarScript\Media\OriginalImage();
         }
 
         if (class_exists(OriginalAttachmentResolver::class)) {
@@ -826,7 +918,7 @@ class API_Client {
             'timezone' => sanitize_text_field((string) ($site['timezone'] ?? wp_timezone_string())),
             'wordpress_version' => sanitize_text_field((string) get_bloginfo('version')),
             'plugin_version' => MDS_IMAGEGRID_VERSION,
-            'mds_version' => defined('MDS3_VERSION') ? MDS3_VERSION : '',
+            'mds_version' => class_exists('\MillionDollarScript\Core\Runtime') ? \MillionDollarScript\Core\Runtime::version() : '',
             'connection_id' => sanitize_text_field((string) ($site['connection_id'] ?? '')),
             'account_id' => sanitize_text_field((string) ($site['account_id'] ?? '')),
             'account_slug' => sanitize_key((string) ($site['account_slug'] ?? '')),
@@ -849,7 +941,7 @@ class API_Client {
     }
 
     /**
-     * Validate a service URL, allowing loopback hosts for local or self-hosted ImageGrid instances.
+     * Validate a service URL, allowing loopback hosts only during local development.
      *
      * @param string $url URL to validate.
      * @return bool
@@ -857,18 +949,37 @@ class API_Client {
     public static function is_allowed_url($url) {
         $parts = wp_parse_url((string) $url);
 
-        if (empty($parts['scheme']) || empty($parts['host']) || !in_array($parts['scheme'], ['http', 'https'], true)) {
+        if (
+            empty($parts['scheme'])
+            || empty($parts['host'])
+            || !in_array($parts['scheme'], ['http', 'https'], true)
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || isset($parts['query'])
+            || isset($parts['fragment'])
+        ) {
             return false;
         }
 
-        $host = strtolower((string) $parts['host']);
-        $is_local_host = in_array($host, ['localhost', '127.0.0.1', '::1', 'host.docker.internal'], true);
-
-        if ($is_local_host) {
-            return true;
+        if (self::is_local_service_url((string) $url)) {
+            return function_exists('wp_get_environment_type')
+                && in_array(wp_get_environment_type(), ['local', 'development'], true);
         }
 
         return (bool) wp_http_validate_url((string) $url);
+    }
+
+    /**
+     * Check whether a URL uses an explicitly supported local-development host.
+     *
+     * @param string $url URL to inspect.
+     * @return bool
+     */
+    private static function is_local_service_url($url) {
+        $parts = wp_parse_url((string) $url);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+
+        return in_array($host, ['localhost', '127.0.0.1', '::1', 'host.docker.internal'], true);
     }
 
     /**

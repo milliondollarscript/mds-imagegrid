@@ -2,10 +2,10 @@
 /**
  * Main ImageGrid extension class.
  *
- * @package MDS\Extensions\ImageGrid
+ * @package MillionDollarScript\Extensions\ImageGrid
  */
 
-namespace MDS\Extensions\ImageGrid;
+namespace MillionDollarScript\Extensions\ImageGrid;
 
 if (!defined('ABSPATH')) {
     exit;
@@ -63,23 +63,114 @@ class Main {
         }
 
         $this->initialized = true;
+        $this->migrate_auto_render_preference();
         $this->migrate_mds3_core_settings();
+        Render_Failure_Notifier::init();
 
         if (is_admin()) {
             Admin::init();
         }
 
-        add_filter('mds3_imagegrid_api_url', [$this, 'filter_mds3_api_url']);
-        add_filter('mds3_imagegrid_api_key', [$this, 'filter_mds3_api_key']);
-        add_filter('mds3_imagegrid_quota', [$this, 'filter_mds3_quota']);
-        add_filter('mds3_imagegrid_remote_enabled', [$this, 'filter_mds3_remote_enabled'], 10, 2);
-        add_filter('mds3_imagegrid_account_status', [$this, 'filter_mds3_account_status'], 10, 2);
-        add_filter('mds3_imagegrid_test_connection', [$this, 'test_mds3_connection'], 10, 2);
-        add_filter('mds3_imagegrid_local_render_threshold_megapixels', [$this, 'filter_mds3_local_render_threshold']);
-        add_filter('mds3_imagegrid_submit_render', [$this, 'submit_mds3_render'], 10, 3);
-        add_filter('mds3_imagegrid_poll_render', [$this, 'poll_mds3_render'], 10, 2);
+        add_filter('million-dollar-script/imagegrid/api/url', [$this, 'filter_mds3_api_url']);
+        add_filter('million-dollar-script/imagegrid/api/key', [$this, 'filter_mds3_api_key']);
+        add_filter('million-dollar-script/imagegrid/quota', [$this, 'filter_mds3_quota']);
+        add_filter('million-dollar-script/imagegrid/remote/enabled', [$this, 'filter_mds3_remote_enabled'], 10, 2);
+        add_filter('million-dollar-script/imagegrid/account/status', [$this, 'filter_mds3_account_status'], 10, 2);
+        add_filter('million-dollar-script/imagegrid/test/connection', [$this, 'test_mds3_connection'], 10, 2);
+        add_filter('million-dollar-script/imagegrid/local/render/threshold/megapixels', [$this, 'filter_mds3_local_render_threshold']);
+        add_filter('million-dollar-script/imagegrid/submit/render', [$this, 'submit_mds3_render'], 10, 3);
+        add_filter('million-dollar-script/imagegrid/poll/render', [$this, 'poll_mds3_render'], 10, 2);
         add_filter('mds_image_processor_generate_tiles_for_grid', [$this, 'maybe_start_remote_generation'], 10, 3);
-        add_filter('mds_imagegrid_client', [$this, 'filter_client']);
+        add_filter('million-dollar-script/extensions/imagegrid/client', [$this, 'filter_client']);
+        add_filter('million-dollar-script/grid/remote/tile/request', [$this, 'remote_tile_request'], 10, 5);
+        add_filter('million-dollar-script/grid/has/remote/tiles', [$this, 'grid_has_remote_tiles'], 10, 2);
+        add_filter('million-dollar-script/grid/remote/tile/metadata', [$this, 'remote_tile_metadata'], 10, 3);
+        add_filter('million-dollar-script/extension/onboarding/items', [$this, 'extension_onboarding_items']);
+    }
+
+    /**
+     * Add ImageGrid setup shortcuts and legal draft recommendations.
+     *
+     * @param array $items Existing onboarding items.
+     * @return array
+     */
+    public function extension_onboarding_items(array $items) {
+        $items['mds-imagegrid'] = [
+            'name' => __('ImageGrid Rendering', 'mds-imagegrid'),
+            'summary' => __('Connect the hosted rendering service, review local fallback limits, confirm CDN Delivery access, and decide when large grids should render remotely.', 'mds-imagegrid'),
+            'priority' => 12,
+            'actions' => [
+                [
+                    'label' => __('Open ImageGrid settings', 'mds-imagegrid'),
+                    'url' => admin_url('admin.php?page=mds3-imagegrid'),
+                    'primary' => true,
+                ],
+                [
+                    'label' => __('Review rendering settings', 'mds-imagegrid'),
+                    'url' => admin_url('admin.php?page=mds3-settings&tab=rendering'),
+                ],
+            ],
+            'legal_documents' => [
+                [
+                    'slug' => 'rendering-service-terms',
+                    'title' => __('ImageGrid Rendering Service Terms', 'mds-imagegrid'),
+                    'description' => __('Terms for hosted rendering, quotas, local fallback, CDN Delivery, fees, failed jobs, and publication responsibility.', 'mds-imagegrid'),
+                    'page_slug' => 'imagegrid-rendering-service-terms',
+                    'content' => $this->imagegrid_rendering_terms_content(),
+                ],
+                [
+                    'slug' => 'rendering-privacy-notice',
+                    'title' => __('ImageGrid Rendering Privacy Notice', 'mds-imagegrid'),
+                    'description' => __('Privacy language for source images, grid metadata, API credentials, hosted processing, CDN delivery, logs, and retention.', 'mds-imagegrid'),
+                    'page_slug' => 'imagegrid-rendering-privacy-notice',
+                    'content' => $this->imagegrid_privacy_notice_content(),
+                ],
+            ],
+        ];
+
+        return $items;
+    }
+
+    /**
+     * Draft ImageGrid service terms content.
+     *
+     * @return string
+     */
+    private function imagegrid_rendering_terms_content() {
+        return '<h2>' . esc_html__('ImageGrid Rendering Service Terms', 'mds-imagegrid') . '</h2>'
+            . '<p>' . esc_html__('These terms apply when {{site_name}} uses ImageGrid to render Million Dollar Script grids, source images, placement artwork, coordinates, tiles, metadata, and rendering instructions. Questions about this service should be sent through {{contact_method}}.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Hosted Rendering and Local Fallback', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Eligible grids may be processed by the hosted ImageGrid service when the extension is enabled, authorized, and configured for remote rendering. Smaller grids, fallback jobs, or jobs that do not qualify for remote processing may render locally in WordPress. Rendering can be delayed, retried, rejected, or unavailable because of quota limits, account status, API availability, source-image problems, unsupported dimensions, security checks, maintenance, or hosting limitations.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Quotas, Fees, Credits, and Failed Jobs', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Remote rendering may depend on an ImageGrid account plan, processing credits, storage limits, CDN Delivery rights, retry limits, and usage safeguards. Fees are charged in the currency shown at checkout or in the connected service account. A submitted job does not guarantee successful rendering, uninterrupted delivery, traffic, sponsor results, search ranking, revenue, or any specific business outcome. Failed or rejected jobs may remain eligible for local rendering or admin review, but processing fees, service credits, and refunds follow the applicable account and checkout terms.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('CDN Delivery and Public Availability', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Remote tile delivery should be enabled only when the connected ImageGrid API key includes CDN Delivery access. Without CDN Delivery, {{site_name}} may keep public grid delivery local even when the hosted service creates render assets. CDN caches, browser caches, and third-party network providers may continue serving previously published files for a limited time after content is changed or removed.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Content Responsibility and Rights', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Site administrators and placement submitters are responsible for image rights, trademarks, copyright permissions, advertising claims, regulated disclosures, accessibility text, prohibited content, landing pages, and any consent required to publish or process submitted materials. {{site_name}} may reject, pause, replace, remove, or re-render content that appears unlawful, infringing, unsafe, malicious, misleading, abusive, technically harmful, or inconsistent with site rules.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Security, Availability, and Changes', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Administrators must protect ImageGrid API keys and only connect trusted accounts. The service may throttle requests, suspend access, rotate credentials, change rendering limits, update delivery paths, or require reauthorization to protect security and reliability. Scheduled or emergency maintenance may temporarily affect rendering, polling, previews, downloads, or CDN delivery.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Support and Disputes', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Support requests should include the site URL, grid ID, job ID when available, affected image or tile details, and a description of the issue. Disputes about submitted artwork, publication decisions, fees, refunds, account access, or service availability are handled under the checkout, account, and site terms that apply to {{site_name}}.', 'mds-imagegrid') . '</p>';
+    }
+
+    /**
+     * Draft ImageGrid privacy notice content.
+     *
+     * @return string
+     */
+    private function imagegrid_privacy_notice_content() {
+        return '<h2>' . esc_html__('ImageGrid Rendering Privacy Notice', 'mds-imagegrid') . '</h2>'
+            . '<p>' . esc_html__('This notice explains how {{site_name}} may process data when ImageGrid is used for hosted or local rendering on {{site_url}}. It supplements the main site privacy policy at {{privacy_policy_url}}.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Data Sent for Rendering', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('When remote rendering is enabled, {{site_name}} may send the data needed to generate grid images and tiles. This can include uploaded sponsor artwork, placement coordinates, grid dimensions, colors, background images, URLs, alt text, job configuration, account identifiers, API authorization data, job status, technical logs, and delivery metadata.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Credentials and Account Data', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('ImageGrid API keys and account connection metadata are administrative credentials. They should be stored only by authorized administrators, never published in public pages, and never shared with sponsors or ordinary site users. If a key may have been exposed, administrators should revoke it, create a new key, review recent jobs, and rotate any related credentials.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Retention, Logs, and CDN Delivery', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Rendered files, source assets, job logs, CDN cache records, request metadata, and abuse-prevention records may be retained as needed to operate the service, troubleshoot failures, verify billing or credits, prevent misuse, and serve cached grid assets. Some cached files may remain available briefly after removal while caches expire. Requests for access, correction, deletion, export, or removal from future renders can be made through {{contact_method}} and may be limited by security, accounting, dispute, backup, or legal-retention requirements.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Third-Party Processing', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Remote rendering, CDN delivery, backups, monitoring, and security logging may involve infrastructure providers outside the direct control of {{site_name}}. Those providers act under their own service terms, data-processing commitments, security controls, and regional transfer safeguards. Administrators should publish any additional provider-specific terms required for the jurisdictions where the site operates.', 'mds-imagegrid') . '</p>'
+            . '<h3>' . esc_html__('Security and User Choices', 'mds-imagegrid') . '</h3>'
+            . '<p>' . esc_html__('Administrators use access controls, nonce checks, API authorization, upload validation, and service-side limits to reduce misuse. Users should submit only artwork and personal information they are allowed to provide. Where privacy law grants rights to access, correct, export, restrict, object to, or erase personal information, requests can be made through {{contact_method}}.', 'mds-imagegrid') . '</p>';
     }
 
     /**
@@ -162,6 +253,8 @@ class Main {
         $connected = $has_api_key && 'connected' === sanitize_key((string) ($last_connection['status'] ?? ''));
         $app_url = $this->app_url();
         $account_name = $this->account_display_name($last_account);
+        $cdn_access = self::has_cdn_delivery_access($last_account);
+        $verified_cdn_access = $connected && $cdn_access;
 
         if ($connected && $enabled) {
             $status = 'connected';
@@ -190,11 +283,19 @@ class Main {
             'label' => $label,
             'plan' => $plan,
             'usage' => $this->account_usage($last_account),
-            'account_url' => $app_url ? $app_url . '/app/account' : ($account['account_url'] ?? ''),
+            'account_url' => $app_url ? $app_url . '/app' : ($account['account_url'] ?? ''),
             'billing_portal_url' => $app_url ? $app_url . '/app/billing' : ($account['billing_portal_url'] ?? ''),
             'connect_url' => $this->connect_url(),
             'reconnect_url' => $this->connect_url('reconnect'),
             'fallback_mode' => $fallback_mode,
+            'features' => array_merge((array) ($account['features'] ?? []), [
+                'cdn_delivery' => $verified_cdn_access,
+                'mds3_cdn' => $verified_cdn_access,
+            ]),
+            'cdn_delivery' => [
+                'enabled' => $verified_cdn_access,
+                'label' => $verified_cdn_access ? __('CDN Delivery enabled', 'mds-imagegrid') : __('CDN Delivery not active', 'mds-imagegrid'),
+            ],
         ]);
     }
 
@@ -211,10 +312,11 @@ class Main {
     /**
      * Return a client instance to callers.
      *
-     * @return API_Client
+     * @param mixed $client Existing client from an earlier filter.
+     * @return object
      */
-    public function filter_client() {
-        return $this->client();
+    public function filter_client($client = null) {
+        return is_object($client) ? $client : new API_Client();
     }
 
     /**
@@ -252,6 +354,7 @@ class Main {
             'message' => __('Connection verified.', 'mds-imagegrid'),
             'checked_at' => current_time('mysql'),
         ], false);
+        self::apply_connected_defaults();
 
         return [
             'ok' => true,
@@ -260,6 +363,40 @@ class Main {
             'api_url' => $client->get_api_url(),
             'account' => $account,
         ];
+    }
+
+    /**
+     * Apply recommended rendering defaults only to a fresh, unconfigured site.
+     *
+     * @return bool Whether defaults were applied.
+     */
+    public static function apply_connected_defaults() {
+        if ('recommended_default' !== (string) get_option('mds_imagegrid_auto_render_preference', '')) {
+            return false;
+        }
+
+        update_option('mds_imagegrid_enabled', true, false);
+        update_option('mds_imagegrid_auto_render', true, false);
+
+        return true;
+    }
+
+    /**
+     * Preserve pre-1.0.6 behavior as an explicit legacy preference.
+     *
+     * Fresh activation runs after plugins_loaded and writes its own sentinel,
+     * while an upgraded installation already has the old boolean option.
+     *
+     * @return void
+     */
+    private function migrate_auto_render_preference() {
+        if ('__missing__' !== get_option('mds_imagegrid_auto_render_preference', '__missing__')) {
+            return;
+        }
+
+        if ('__missing__' !== get_option('mds_imagegrid_auto_render', '__missing__')) {
+            add_option('mds_imagegrid_auto_render_preference', 'legacy_preserved', '', 'no');
+        }
     }
 
     /**
@@ -326,12 +463,11 @@ class Main {
         $grid = isset($context['grid']) ? $context['grid'] : null;
 
         if (!$grid || !is_object($grid)) {
-            if (!class_exists('\\MDS\\Core\\Grid')) {
+            if (!class_exists('\\MillionDollarScript\\Core\\Grids')) {
                 return $result;
             }
 
-            $grid_model = new \MDS\Core\Grid();
-            $grid = $grid_model->get($grid_id);
+            $grid = \MillionDollarScript\Core\Grids::find($grid_id);
         }
 
         if (!$grid) {
@@ -349,12 +485,6 @@ class Main {
         $response = self::submit_grid_render($grid_id, $grid);
 
         if (is_wp_error($response)) {
-            self::update_grid_state($grid_id, [
-                'status'     => 'failed',
-                'last_error' => $response->get_error_message(),
-                'updated_at' => current_time('mysql'),
-            ]);
-
             return null;
         }
 
@@ -362,6 +492,98 @@ class Main {
             'status' => 'remote_queued',
             'job_id' => $response['id'] ?? '',
         ];
+    }
+
+    /**
+     * Provide a remote tile descriptor for MDS3's tile proxy.
+     *
+     * @param mixed $request Existing request descriptor.
+     * @param int   $grid_id Grid ID.
+     * @param int   $z       Zoom level.
+     * @param int   $x       Tile x coordinate.
+     * @param int   $y       Tile y coordinate.
+     * @return mixed
+     */
+    public function remote_tile_request($request, $grid_id, $z, $x, $y) {
+        if (null !== $request || !self::can_serve_remote_tiles()) {
+            return $request;
+        }
+
+        $state = self::get_grid_state($grid_id);
+        if (!self::state_is_remote_ready($state)) {
+            return $request;
+        }
+
+        $tile_request = $this->client()->get_tileset_tile_request(
+            $state['tileset_id'],
+            absint($z),
+            absint($x),
+            absint($y),
+            $state['format'] ?? 'png'
+        );
+
+        return is_wp_error($tile_request) ? $request : $tile_request;
+    }
+
+    /**
+     * Tell MDS3 grid state responses when remote tiles are available.
+     *
+     * @param bool $has_remote Existing flag.
+     * @param int  $grid_id    Grid ID.
+     * @return bool
+     */
+    public function grid_has_remote_tiles($has_remote, $grid_id) {
+        if ($has_remote || !self::can_serve_remote_tiles()) {
+            return (bool) $has_remote;
+        }
+
+        return self::state_is_remote_ready(self::get_grid_state($grid_id));
+    }
+
+    /**
+     * Provide tile metadata for MDS3's OpenLayers renderer.
+     *
+     * @param array  $metadata Existing metadata.
+     * @param int    $grid_id  Grid ID.
+     * @param object $grid     Grid object.
+     * @return array
+     */
+    public function remote_tile_metadata(array $metadata, $grid_id, $grid = null) {
+        unset($grid);
+
+        if (!self::can_serve_remote_tiles()) {
+            return $metadata;
+        }
+
+        $state = self::get_grid_state($grid_id);
+        if (!self::state_is_remote_ready($state)) {
+            return $metadata;
+        }
+
+        return array_merge($metadata, [
+            'remote' => true,
+            'job_id' => sanitize_text_field((string) ($state['job_id'] ?? '')),
+            'tileset_id' => sanitize_text_field((string) ($state['tileset_id'] ?? '')),
+            'url_template' => self::sanitize_tile_url_template((string) ($state['tile_url_template'] ?? '')),
+            'format' => sanitize_key((string) ($state['format'] ?? 'png')),
+            'tile_size' => max(64, absint($state['tile_size'] ?? 256)),
+            'min_level' => absint($state['min_level'] ?? 0),
+            'max_level' => absint($state['max_level'] ?? 0),
+            'level_scheme' => 'deepzoom',
+            'updated_at' => sanitize_text_field((string) ($state['updated_at'] ?? '')),
+        ]);
+    }
+
+    /**
+     * Whether a stored ImageGrid state can serve remote tiles.
+     *
+     * @param array $state Stored grid state.
+     * @return bool
+     */
+    private static function state_is_remote_ready(array $state) {
+        return 'ready' === sanitize_key((string) ($state['status'] ?? ''))
+            && !empty($state['tileset_id'])
+            && empty($state['patch_job_id']);
     }
 
     /**
@@ -380,11 +602,25 @@ class Main {
         $client = $this->client();
         $ready = $client->ready();
         if (is_wp_error($ready)) {
+            $grid_id = absint($manifest['grid']['id'] ?? 0);
+            self::update_grid_state($grid_id, [
+                'status' => 'failed',
+                'last_error' => $ready->get_error_message(),
+                'failure_code' => $ready->get_error_code(),
+                'updated_at' => current_time('mysql'),
+            ]);
             return $ready;
         }
 
         $response = $client->create_manifest_render_job($manifest, $preflight);
         if (is_wp_error($response)) {
+            $grid_id = absint($manifest['grid']['id'] ?? 0);
+            self::update_grid_state($grid_id, [
+                'status' => 'failed',
+                'last_error' => $response->get_error_message(),
+                'failure_code' => $response->get_error_code(),
+                'updated_at' => current_time('mysql'),
+            ]);
             return $response;
         }
 
@@ -393,12 +629,15 @@ class Main {
         $result_payload = is_array($response['result'] ?? null) ? $response['result'] : [];
         $tileset_id = sanitize_text_field((string) ($result_payload['tileset_id'] ?? $response['tileset_id'] ?? ''));
         $status = self::normalize_job_status($response['status'] ?? 'pending');
+        $last_error = 'failed' === $status
+            ? sanitize_text_field((string) ($response['error_message'] ?? __('ImageGrid job failed.', 'mds-imagegrid')))
+            : '';
 
         if ($grid_id) {
-            self::update_grid_state($grid_id, [
+            self::update_grid_state($grid_id, array_merge([
                 'job_id' => $job_id,
                 'status' => $status,
-                'operation' => $response['operation'] ?? 'mds_grid_composition',
+                'operation' => $response['operation'] ?? 'grid_render',
                 'tileset_id' => $tileset_id,
                 'format' => $result_payload['format'] ?? 'png',
                 'manifest' => self::compact_manifest_state($manifest),
@@ -409,15 +648,15 @@ class Main {
                 'preflight' => $preflight,
                 'submitted_at' => current_time('mysql'),
                 'updated_at' => current_time('mysql'),
-                'last_error' => '',
-            ]);
+                'last_error' => $last_error,
+            ], self::tile_delivery_state($result_payload)));
         }
 
         return [
             'remote_job_id' => $job_id,
             'remote_tileset_id' => $tileset_id,
             'status' => $status,
-            'operation' => $response['operation'] ?? 'mds_grid_composition',
+            'operation' => $response['operation'] ?? 'grid_render',
             'result' => $response,
         ];
     }
@@ -449,6 +688,13 @@ class Main {
 
         $response = $this->client()->get_job($job_id);
         if (is_wp_error($response)) {
+            if ($grid_id) {
+                self::update_grid_state($grid_id, [
+                    'last_error' => $response->get_error_message(),
+                    'failure_code' => $response->get_error_code(),
+                    'updated_at' => current_time('mysql'),
+                ]);
+            }
             return $response;
         }
 
@@ -464,7 +710,7 @@ class Main {
         }
 
         if ($grid_id) {
-            self::update_grid_state($grid_id, [
+            self::update_grid_state($grid_id, array_merge([
                 'job_id' => $response['id'] ?? $job_id,
                 'status' => $status,
                 'tileset_id' => $tileset_id,
@@ -473,9 +719,11 @@ class Main {
                 'min_level' => $result_payload['min_level'] ?? 0,
                 'max_level' => $result_payload['max_level'] ?? 0,
                 'total_tiles' => $result_payload['total_tiles'] ?? 0,
-                'last_error' => sanitize_text_field((string) ($response['error_message'] ?? '')),
+                'last_error' => 'failed' === $status
+                    ? sanitize_text_field((string) ($response['error_message'] ?? __('ImageGrid job failed.', 'mds-imagegrid')))
+                    : sanitize_text_field((string) ($response['error_message'] ?? '')),
                 'updated_at' => current_time('mysql'),
-            ]);
+            ], self::tile_delivery_state($result_payload, self::get_grid_state($grid_id))));
         }
 
         return [
@@ -519,7 +767,7 @@ class Main {
                 return $this->start_manifest_patch_queue($grid_id, $tileset_id, $state);
             }
 
-            self::update_grid_state($grid_id, [
+            self::update_grid_state($grid_id, array_merge([
                 'patch_job_id' => '',
                 'patch_complete' => true,
                 'status' => 'ready',
@@ -531,7 +779,7 @@ class Main {
                 'total_tiles' => $result_payload['total_tiles'] ?? ($state['total_tiles'] ?? 0),
                 'last_error' => '',
                 'updated_at' => current_time('mysql'),
-            ]);
+            ], self::tile_delivery_state($result_payload, $state)));
 
             return [
                 'status' => 'ready',
@@ -669,7 +917,7 @@ class Main {
      * Submit a grid render job.
      *
      * @param int                 $grid_id Grid ID.
-     * @param \MDS\Core\Grid|null $grid    Optional grid object.
+     * @param \MillionDollarScript\Core\Grid|null $grid Optional grid object.
      * @return array|\WP_Error
      */
     public static function submit_grid_render($grid_id, $grid = null) {
@@ -690,6 +938,7 @@ class Main {
             self::update_grid_state($grid_id, [
                 'status'     => 'failed',
                 'last_error' => $preflight->get_error_message(),
+                'failure_code' => $preflight->get_error_code(),
                 'updated_at' => current_time('mysql'),
             ]);
 
@@ -707,6 +956,7 @@ class Main {
                 'status'     => 'failed',
                 'preflight'  => $preflight,
                 'last_error' => $message,
+                'failure_code' => 'mds_imagegrid_preflight_failed_' . $failing_key,
                 'updated_at' => current_time('mysql'),
             ]);
 
@@ -716,19 +966,30 @@ class Main {
         $response = $client->create_grid_render_job($grid);
 
         if (is_wp_error($response)) {
+            self::update_grid_state($grid_id, [
+                'status' => 'failed',
+                'last_error' => $response->get_error_message(),
+                'failure_code' => $response->get_error_code(),
+                'updated_at' => current_time('mysql'),
+            ]);
             return $response;
         }
 
+        $status = self::normalize_job_status($response['status'] ?? 'pending');
+        $last_error = 'failed' === $status
+            ? sanitize_text_field((string) ($response['error_message'] ?? __('ImageGrid job failed.', 'mds-imagegrid')))
+            : '';
+
         self::update_grid_state($grid_id, [
             'job_id'     => $response['id'] ?? '',
-            'status'     => self::normalize_job_status($response['status'] ?? 'pending'),
-            'operation'  => $response['operation'] ?? 'mds_grid_composition',
+            'status'     => $status,
+            'operation'  => $response['operation'] ?? 'grid_render',
             'tileset_id' => '',
             'format'     => 'png',
             'preflight'  => $preflight,
             'submitted_at' => current_time('mysql'),
             'updated_at' => current_time('mysql'),
-            'last_error' => '',
+            'last_error' => $last_error,
         ]);
 
         return $response;
@@ -754,6 +1015,7 @@ class Main {
         if (is_wp_error($response)) {
             self::update_grid_state($grid_id, [
                 'last_error' => $response->get_error_message(),
+                'failure_code' => $response->get_error_code(),
                 'updated_at' => current_time('mysql'),
             ]);
 
@@ -762,18 +1024,23 @@ class Main {
 
         $result = isset($response['result']) && is_array($response['result']) ? $response['result'] : [];
 
-        self::update_grid_state($grid_id, [
+        $status = self::normalize_job_status($response['status'] ?? ($state['status'] ?? ''));
+        $last_error = 'failed' === $status
+            ? sanitize_text_field((string) ($response['error_message'] ?? __('ImageGrid job failed.', 'mds-imagegrid')))
+            : sanitize_text_field((string) ($response['error_message'] ?? ''));
+
+        self::update_grid_state($grid_id, array_merge([
             'job_id'     => $response['id'] ?? $job_id,
-            'status'     => self::normalize_job_status($response['status'] ?? ($state['status'] ?? '')),
+            'status'     => $status,
             'tileset_id' => $result['tileset_id'] ?? ($state['tileset_id'] ?? ''),
             'format'     => $result['format'] ?? ($state['format'] ?? 'png'),
             'tile_size'  => $result['tile_size'] ?? ($state['tile_size'] ?? 256),
             'min_level'  => $result['min_level'] ?? ($state['min_level'] ?? 0),
             'max_level'  => $result['max_level'] ?? ($state['max_level'] ?? 0),
             'total_tiles' => $result['total_tiles'] ?? ($state['total_tiles'] ?? 0),
-            'last_error' => $response['error_message'] ?? '',
+            'last_error' => $last_error,
             'updated_at' => current_time('mysql'),
-        ]);
+        ], self::tile_delivery_state($result, $state)));
 
         return $response;
     }
@@ -826,6 +1093,52 @@ class Main {
     }
 
     /**
+     * Extract direct tile delivery fields returned by ImageGrid, if present.
+     *
+     * @param array $result Remote job result payload.
+     * @param array $state  Existing grid state.
+     * @return array
+     */
+    private static function tile_delivery_state(array $result, array $state = []) {
+        $template = self::sanitize_tile_url_template((string) (
+            $result['public_tile_url_template']
+            ?? $result['tile_url_template']
+            ?? $result['cdn_tile_url_template']
+            ?? $result['url_template']
+            ?? ($state['tile_url_template'] ?? '')
+        ));
+
+        return [
+            'tile_url_template' => $template,
+            'level_scheme' => 'deepzoom',
+        ];
+    }
+
+    /**
+     * Validate a browser-safe tile URL template.
+     *
+     * @param string $template URL containing {z}, {x}, and {y} tokens.
+     * @return string
+     */
+    private static function sanitize_tile_url_template($template) {
+        $template = trim((string) $template);
+        if ('' === $template) {
+            return '';
+        }
+
+        $template = str_replace(['%7Bz%7D', '%7Bx%7D', '%7By%7D', '%7Bformat%7D'], ['{z}', '{x}', '{y}', '{format}'], $template);
+        foreach (['{z}', '{x}', '{y}'] as $token) {
+            if (false === strpos($template, $token)) {
+                return '';
+            }
+        }
+
+        $check_url = str_replace(['{z}', '{x}', '{y}', '{format}'], ['0', '0', '0', 'png'], $template);
+
+        return esc_url_raw($check_url) ? $template : '';
+    }
+
+    /**
      * Get grid remote state.
      *
      * @param int $grid_id Grid ID.
@@ -846,10 +1159,24 @@ class Main {
      */
     public static function update_grid_state($grid_id, array $state) {
         $grid_id = absint($grid_id);
+        if (!$grid_id) {
+            return;
+        }
+
         $existing = self::get_grid_state($grid_id);
         $updated = array_merge($existing, $state);
 
         update_option(self::grid_state_option_name($grid_id), $updated, false);
+
+        $last_error = sanitize_text_field((string) ($state['last_error'] ?? ''));
+        if ('' !== $last_error) {
+            Render_Failure_Notifier::record($grid_id, (string) ($state['failure_code'] ?? $state['status'] ?? ''), $last_error);
+            return;
+        }
+
+        if (array_key_exists('last_error', $state) && in_array(sanitize_key((string) ($updated['status'] ?? '')), ['pending', 'queued', 'running', 'rendering', 'ready'], true)) {
+            Render_Failure_Notifier::resolve_grid($grid_id);
+        }
     }
 
     /**
@@ -941,6 +1268,104 @@ class Main {
     }
 
     /**
+     * Resolve CDN access from supported account payload shapes.
+     *
+     * @param array $account Stored account payload.
+     * @return bool
+     */
+    private static function account_payload_has_cdn_delivery_access(array $account) {
+        $keys = ['mds3_cdn', 'mds_cdn_delivery', 'cdn_delivery'];
+        $feature_sets = [
+            $account['features'] ?? null,
+            $account['capabilities'] ?? null,
+            $account['permissions'] ?? null,
+            $account['account']['features'] ?? null,
+            $account['account']['capabilities'] ?? null,
+            $account['account']['permissions'] ?? null,
+            $account['api_key']['features'] ?? null,
+            $account['api_key']['capabilities'] ?? null,
+            $account['api_key']['permissions'] ?? null,
+        ];
+
+        foreach ($feature_sets as $features) {
+            if (!is_array($features)) {
+                continue;
+            }
+
+            foreach ($keys as $key) {
+                if (array_key_exists($key, $features) && self::truthy($features[$key])) {
+                    return true;
+                }
+            }
+        }
+
+        $entitlement_sets = [
+            $account['entitlements'] ?? null,
+            $account['account']['entitlements'] ?? null,
+            $account['api_key']['entitlements'] ?? null,
+        ];
+
+        foreach ($entitlement_sets as $entitlements) {
+            if (!is_array($entitlements)) {
+                continue;
+            }
+
+            foreach ($entitlements as $key => $entitlement) {
+                if (is_string($key) && in_array($key, $keys, true) && self::entitlement_enabled($entitlement)) {
+                    return true;
+                }
+
+                if (is_array($entitlement)) {
+                    $feature_code = sanitize_key((string) ($entitlement['feature_code'] ?? $entitlement['code'] ?? ''));
+                    if (in_array($feature_code, $keys, true) && self::entitlement_enabled($entitlement)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Interpret entitlement status payloads from ImageGrid.
+     *
+     * @param mixed $entitlement Entitlement value.
+     * @return bool
+     */
+    private static function entitlement_enabled($entitlement) {
+        if (!is_array($entitlement)) {
+            return self::truthy($entitlement);
+        }
+
+        $status = sanitize_key((string) ($entitlement['status'] ?? ''));
+        if (array_key_exists('enabled', $entitlement)) {
+            return self::truthy($entitlement['enabled'])
+                && ('' === $status || in_array($status, ['trialing', 'active'], true));
+        }
+
+        return in_array($status, ['trialing', 'active'], true);
+    }
+
+    /**
+     * Normalize boolean-like API values.
+     *
+     * @param mixed $value Value from account metadata.
+     * @return bool
+     */
+    private static function truthy($value) {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return (float) $value > 0;
+        }
+
+        return in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'on', 'enabled', 'active'], true);
+    }
+
+    /**
      * Whether remote integration is enabled.
      *
      * @return bool
@@ -950,12 +1375,37 @@ class Main {
     }
 
     /**
+     * Whether the connected account has paid CDN delivery for public MDS3 tiles.
+     *
+     * @param array|null $account Optional account payload.
+     * @return bool
+     */
+    public static function has_cdn_delivery_access($account = null) {
+        if (null === $account) {
+            $account = get_option('mds_imagegrid_last_account', []);
+        }
+
+        return is_array($account) && self::account_payload_has_cdn_delivery_access($account);
+    }
+
+    /**
+     * Whether remote tile proxying may be exposed to public grids.
+     *
+     * @return bool
+     */
+    private static function can_serve_remote_tiles() {
+        return self::is_enabled() && self::has_cdn_delivery_access();
+    }
+
+    /**
      * Create an API client.
      *
-     * @return API_Client
+     * @return object
      */
     private function client() {
-        return new API_Client();
+        $client = \MillionDollarScript\Core\Hooks::apply_compat('million-dollar-script/extensions/imagegrid/client', ['mds_imagegrid_client'], null);
+
+        return is_object($client) ? $client : new API_Client();
     }
 
     /**
@@ -967,14 +1417,8 @@ class Main {
     private static function get_grid($grid_id) {
         $grid_id = absint($grid_id);
 
-        if (class_exists('\\MDS3\\Grid\\GridRepository')) {
-            return (new \MDS3\Grid\GridRepository())->find($grid_id);
-        }
-
-        if (class_exists('\\MDS\\Core\\Grid')) {
-            $grid_model = new \MDS\Core\Grid();
-
-            return $grid_model->get($grid_id);
+        if (class_exists('\\MillionDollarScript\\Core\\Grids')) {
+            return \MillionDollarScript\Core\Grids::find($grid_id);
         }
 
         return null;

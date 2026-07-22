@@ -2,10 +2,10 @@
 /**
  * ImageGrid admin UI.
  *
- * @package MDS\Extensions\ImageGrid
+ * @package MillionDollarScript\Extensions\ImageGrid
  */
 
-namespace MDS\Extensions\ImageGrid;
+namespace MillionDollarScript\Extensions\ImageGrid;
 
 if (!defined('ABSPATH')) {
     exit;
@@ -27,20 +27,20 @@ class Admin {
      */
     public static function init() {
         add_action('admin_menu', [__CLASS__, 'register_menu'], 36);
-        add_action('mds3_admin_menu', [__CLASS__, 'register_mds3_menu']);
-        add_action('admin_head', [__CLASS__, 'hide_mds3_sidebar_menu']);
+        add_action('million-dollar-script/admin/menu', [__CLASS__, 'register_mds3_menu']);
         add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_assets']);
-        add_filter('mds3_dashboard_menu_items', [__CLASS__, 'register_mds3_dashboard_menu']);
-        add_action('mds3_admin_settings_group_rendering', [__CLASS__, 'render_mds3_settings_panel']);
-        add_filter('mds3_admin_grid_tabs', [__CLASS__, 'register_mds3_grid_tab'], 10, 2);
-        add_action('mds3_admin_grid_tab_panels', [__CLASS__, 'render_mds3_grid_panel'], 10, 2);
-        add_filter('mds3_admin_validate_settings', [__CLASS__, 'validate_mds3_settings'], 10, 3);
-        add_filter('mds3_admin_sanitize_settings', [__CLASS__, 'sanitize_mds3_settings'], 10, 3);
-        add_action('mds3_admin_settings_saved', [__CLASS__, 'after_mds3_settings_saved'], 10, 3);
+        add_filter('million-dollar-script/dashboard/extension/cards', [__CLASS__, 'register_mds3_dashboard_card']);
+        add_action('million-dollar-script/admin/settings/group/rendering', [__CLASS__, 'render_mds3_settings_panel']);
+        add_filter('million-dollar-script/admin/grid/tabs', [__CLASS__, 'register_mds3_grid_tab'], 10, 2);
+        add_action('million-dollar-script/admin/grid/tab/panels', [__CLASS__, 'render_mds3_grid_panel'], 10, 2);
+        add_filter('million-dollar-script/admin/validate/settings', [__CLASS__, 'validate_mds3_settings'], 10, 3);
+        add_filter('million-dollar-script/admin/sanitize/settings', [__CLASS__, 'sanitize_mds3_settings'], 10, 3);
+        add_action('million-dollar-script/admin/settings/saved', [__CLASS__, 'after_mds3_settings_saved'], 10, 3);
         add_action('admin_post_mds_imagegrid_save_settings', [__CLASS__, 'handle_save_settings']);
         add_action('admin_post_mds_imagegrid_test_connection', [__CLASS__, 'handle_test_connection']);
         add_action('admin_post_mds_imagegrid_connect_return', [__CLASS__, 'handle_connect_return']);
         add_action('admin_post_mds_imagegrid_disconnect', [__CLASS__, 'handle_disconnect']);
+        add_action('admin_post_mds_imagegrid_reset_plan_limits', [__CLASS__, 'handle_reset_plan_limits']);
         add_action('admin_post_mds_imagegrid_submit_grid_render', [__CLASS__, 'handle_submit_grid_render']);
         add_action('admin_post_mds_imagegrid_refresh_job', [__CLASS__, 'handle_refresh_job']);
     }
@@ -51,7 +51,7 @@ class Admin {
      * @return void
      */
     public static function register_menu() {
-        if (defined('MDS3_VERSION')) {
+        if (class_exists('\MillionDollarScript\Core\Runtime')) {
             return;
         }
 
@@ -71,7 +71,7 @@ class Admin {
      * @return void
      */
     public static function register_mds3_menu() {
-        if (!defined('MDS3_VERSION')) {
+        if (!class_exists('\MillionDollarScript\Core\Runtime')) {
             return;
         }
 
@@ -86,45 +86,52 @@ class Admin {
     }
 
     /**
-     * Keep ImageGrid in the Million Dollar Script dashboard menu instead of the WordPress sidebar.
+     * Add ImageGrid quick actions to the dashboard Extensions section.
      *
-     * @return void
-     */
-    public static function hide_mds3_sidebar_menu() {
-        if (defined('MDS3_VERSION')) {
-            remove_submenu_page('mds3', 'mds3-imagegrid');
-        }
-    }
-
-    /**
-     * Add ImageGrid to the internal MDS3 manage menu without crowding the WordPress sidebar.
-     *
-     * @param array $groups Existing dashboard menu groups.
+     * @param array $cards Dashboard extension cards keyed by slug.
      * @return array
      */
-    public static function register_mds3_dashboard_menu(array $groups) {
-        if (!defined('MDS3_VERSION')) {
-            return $groups;
+    public static function register_mds3_dashboard_card(array $cards) {
+        if (!class_exists('\MillionDollarScript\Core\Runtime')) {
+            return $cards;
         }
 
-        if (!isset($groups['manage']) || !is_array($groups['manage'])) {
-            $groups['manage'] = [
-                'label' => __('Manage', 'mds-imagegrid'),
-                'items' => [],
-            ];
-        }
-
-        if (empty($groups['manage']['items']) || !is_array($groups['manage']['items'])) {
-            $groups['manage']['items'] = [];
-        }
-
-        $groups['manage']['items'][] = [
-            'label' => __('ImageGrid', 'mds-imagegrid'),
-            'url' => admin_url('admin.php?page=mds3-imagegrid'),
-            'icon' => 'dashicons-format-image',
+        $slug = 'mds-imagegrid';
+        $card = isset($cards[$slug]) && is_array($cards[$slug]) ? $cards[$slug] : [
+            'slug' => $slug,
+            'name' => __('ImageGrid Rendering', 'mds-imagegrid'),
+            'description' => __('Render large pixel grids through the hosted ImageGrid service when local rendering is not practical.', 'mds-imagegrid'),
+            'active' => true,
+            'installed' => true,
+            'actions' => [],
         ];
 
-        return $groups;
+        $card['description'] = __('Render large pixel grids through the hosted ImageGrid service when local rendering is not practical.', 'mds-imagegrid');
+        $card['actions'] = [
+            [
+                'label' => __('Open ImageGrid', 'mds-imagegrid'),
+                'url' => admin_url('admin.php?page=mds3-imagegrid'),
+                'primary' => true,
+                'icon' => 'dashicons-format-image',
+            ],
+            [
+                'label' => __('Docs', 'mds-imagegrid'),
+                'url' => add_query_arg([
+                    'page' => 'mds3-docs',
+                    'package' => 'mds-imagegrid',
+                    'doc' => 'usage',
+                ], admin_url('admin.php')),
+                'icon' => 'dashicons-book',
+            ],
+            [
+                'label' => __('Rendering settings', 'mds-imagegrid'),
+                'url' => admin_url('admin.php?page=mds3-settings&tab=rendering'),
+                'icon' => 'dashicons-admin-generic',
+            ],
+        ];
+        $cards[$slug] = $card;
+
+        return $cards;
     }
 
     /**

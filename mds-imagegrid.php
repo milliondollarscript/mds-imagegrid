@@ -1,20 +1,22 @@
 <?php
 /**
- * Plugin Name: Million Dollar Script ImageGrid
+ * Plugin Name: Million Dollar Script - ImageGrid Rendering
  * Plugin URI: https://milliondollarscript.com/extensions/imagegrid
  * Description: Free connector for rendering Million Dollar Script grids with the paid ImageGrid service.
- * Version: 1.0.1
+ * Version: 1.0.8
  * Author: Million Dollar Script
  * Author URI: https://milliondollarscript.com
  * Text Domain: mds-imagegrid
  * Domain Path: /languages
  * Requires at least: 6.0
+ * Tested up to: 7.0.2
  * Requires PHP: 8.1
  * License: GPL-3.0+
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
  * Requires Plugins: million-dollar-script
  *
  * Requires MDS: 3.0.0
+ * Requires MDS API: 1
  * Requires License: No
  * MDS Provides: rendering.imagegrid
  * MDS Requires: inventory.grid
@@ -24,17 +26,17 @@
  * MDS API Manifest: https://imagegrid.dev/docs/openapi.json
  * MDS LLM Safe Actions: read_account read_render_status submit_render
  *
- * @package MDS\Extensions\ImageGrid
+ * @package MillionDollarScript\Extensions\ImageGrid
  */
 
-namespace MDS\Extensions\ImageGrid;
+namespace MillionDollarScript\Extensions\ImageGrid;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
 if (!defined('MDS_IMAGEGRID_VERSION')) {
-    define('MDS_IMAGEGRID_VERSION', '1.0.1');
+    define('MDS_IMAGEGRID_VERSION', '1.0.8');
 }
 
 if (!defined('MDS_IMAGEGRID_FILE')) {
@@ -71,7 +73,7 @@ function mds_imagegrid_default_api_url() {
         ? 'http://host.docker.internal:18082'
         : 'https://api.imagegrid.dev';
 
-    return untrailingslashit((string) apply_filters('mds_imagegrid_default_api_url', $default));
+    return untrailingslashit((string) \MillionDollarScript\Core\Hooks::apply_compat('million-dollar-script/extensions/imagegrid/default/api/url', ['mds_imagegrid_default_api_url'], $default));
 }
 
 /**
@@ -80,11 +82,16 @@ function mds_imagegrid_default_api_url() {
  * @return string
  */
 function mds_imagegrid_app_url() {
-    $default = defined('MDS_IMAGEGRID_APP_URL') && MDS_IMAGEGRID_APP_URL
-        ? (string) MDS_IMAGEGRID_APP_URL
-        : 'https://imagegrid.dev';
+    if (defined('MDS_IMAGEGRID_APP_URL') && MDS_IMAGEGRID_APP_URL) {
+        $default = (string) MDS_IMAGEGRID_APP_URL;
+    } else {
+        $environment = function_exists('wp_get_environment_type') ? wp_get_environment_type() : 'production';
+        $default = in_array($environment, ['local', 'development'], true)
+            ? 'http://localhost:18082'
+            : 'https://imagegrid.dev';
+    }
 
-    return untrailingslashit((string) apply_filters('mds_imagegrid_app_url', $default));
+    return untrailingslashit((string) \MillionDollarScript\Core\Hooks::apply_compat('million-dollar-script/extensions/imagegrid/app/url', ['mds_imagegrid_app_url'], $default));
 }
 
 /**
@@ -93,8 +100,8 @@ function mds_imagegrid_app_url() {
  * @return bool
  */
 function mds_imagegrid_check_mds_active() {
-    return (class_exists('\\MDS\\Core\\Plugin') && function_exists('mds_initialize'))
-        || (class_exists('\\MDS3\\Plugin') && defined('MDS3_VERSION'));
+    return class_exists('\\MillionDollarScript\\Core\\Runtime')
+        && \MillionDollarScript\Core\Runtime::is_ready();
 }
 
 /**
@@ -104,7 +111,7 @@ function mds_imagegrid_check_mds_active() {
  */
 function mds_imagegrid_missing_mds_notice() {
     echo '<div class="notice notice-error"><p>';
-    echo '<strong>' . esc_html__('Million Dollar Script ImageGrid', 'mds-imagegrid') . '</strong>: ';
+    echo '<strong>' . esc_html__('Million Dollar Script - ImageGrid Rendering', 'mds-imagegrid') . '</strong>: ';
     echo esc_html__('This extension requires the Million Dollar Script plugin to be installed and activated.', 'mds-imagegrid');
     echo ' <a href="' . esc_url(admin_url('plugins.php')) . '">' . esc_html__('Manage Plugins', 'mds-imagegrid') . '</a>';
     echo '</p></div>';
@@ -116,13 +123,10 @@ function mds_imagegrid_missing_mds_notice() {
  * @return void
  */
 function mds_imagegrid_load_files() {
-    require_once MDS_IMAGEGRID_PATH . 'includes/APIClient.php';
-    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/RendersImageGridAdminPanels.php';
-    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/ValidatesImageGridSettings.php';
-    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/HandlesImageGridAdminActions.php';
-    require_once MDS_IMAGEGRID_PATH . 'includes/Concerns/SupportsImageGridAdmin.php';
-    require_once MDS_IMAGEGRID_PATH . 'includes/Admin.php';
-    require_once MDS_IMAGEGRID_PATH . 'includes/Main.php';
+    \MillionDollarScript\Extensions\Support::register_autoloader(
+        __NAMESPACE__,
+        MDS_IMAGEGRID_PATH . 'includes'
+    );
 }
 
 /**
@@ -152,10 +156,10 @@ function mds_imagegrid_register_extension() {
 
     mds_imagegrid_load_files();
 
-    if (class_exists('\\MDS\\Core\\Extensions\\Manager')) {
-        \MDS\Core\Extensions\Manager::register([
+    if (class_exists('\\MillionDollarScript\\Extensions\\Registry')) {
+        \MillionDollarScript\Extensions\Registry::register([
             'id'               => 'mds-imagegrid',
-            'name'             => 'ImageGrid',
+            'name'             => 'ImageGrid Rendering',
             'description'      => 'Free connector for hosted ImageGrid rendering.',
             'version'          => MDS_IMAGEGRID_VERSION,
             'author'           => 'Million Dollar Script',
@@ -167,10 +171,10 @@ function mds_imagegrid_register_extension() {
                 'payment_gateway' => false,
                 'admin_pages'     => true,
                 'frontend_assets' => false,
-                'remote_tiles'    => false,
+                'remote_tiles'    => true,
                 'imagegrid'        => true,
             ],
-            'init_callback'    => ['\\MDS\\Extensions\\ImageGrid\\Main', 'init'],
+            'init_callback'    => ['\\MillionDollarScript\\Extensions\\ImageGrid\\Main', 'init'],
         ]);
     }
 }
@@ -184,14 +188,24 @@ function mds_imagegrid_activate() {
     if (!mds_imagegrid_check_mds_active()) {
         deactivate_plugins(MDS_IMAGEGRID_BASENAME);
         wp_die(
-            esc_html__('Million Dollar Script ImageGrid requires the Million Dollar Script plugin to be installed and activated.', 'mds-imagegrid'),
+            esc_html__('Million Dollar Script - ImageGrid Rendering requires the Million Dollar Script plugin to be installed and activated.', 'mds-imagegrid'),
             esc_html__('Plugin Activation Error', 'mds-imagegrid'),
             ['back_link' => true]
         );
     }
 
+    $had_auto_render_option = '__missing__' !== get_option('mds_imagegrid_auto_render', '__missing__');
+
     add_option('mds_imagegrid_enabled', false);
-    add_option('mds_imagegrid_auto_render', false);
+    add_option('mds_imagegrid_auto_render', true);
+    add_option('mds_imagegrid_failure_email_enabled', false);
+    add_option('mds_imagegrid_render_failures', [], '', 'no');
+    add_option(
+        'mds_imagegrid_auto_render_preference',
+        $had_auto_render_option ? 'legacy_preserved' : 'recommended_default',
+        '',
+        'no'
+    );
     add_option('mds_imagegrid_api_url', mds_imagegrid_default_api_url());
     add_option('mds_imagegrid_api_key', '', '', 'no');
     add_option('mds_imagegrid_local_render_threshold_megapixels', 25);
@@ -226,9 +240,9 @@ function mds_imagegrid_activation_notice() {
     }
 
     echo '<div class="notice notice-success is-dismissible"><p>';
-    echo '<strong>' . esc_html__('Million Dollar Script ImageGrid', 'mds-imagegrid') . '</strong>: ';
-    echo esc_html__('Extension activated. Add your ImageGrid API key to enable remote grid rendering.', 'mds-imagegrid');
-    echo ' <a href="' . esc_url(admin_url('admin.php?page=mds3-settings')) . '">' . esc_html__('Settings', 'mds-imagegrid') . '</a>';
+    echo '<strong>' . esc_html__('Million Dollar Script - ImageGrid Rendering', 'mds-imagegrid') . '</strong>: ';
+    echo esc_html__('Extension activated. Connect an ImageGrid account to enable automatic rendering for eligible grids.', 'mds-imagegrid');
+    echo ' <a href="' . esc_url(admin_url('admin.php?page=mds3-imagegrid&section=connection')) . '">' . esc_html__('Connect ImageGrid', 'mds-imagegrid') . '</a>';
     echo '</p></div>';
 
     delete_transient('mds_imagegrid_activated');
@@ -238,7 +252,7 @@ register_activation_hook(MDS_IMAGEGRID_FILE, __NAMESPACE__ . '\\mds_imagegrid_ac
 register_deactivation_hook(MDS_IMAGEGRID_FILE, __NAMESPACE__ . '\\mds_imagegrid_deactivate');
 
 add_action('plugins_loaded', __NAMESPACE__ . '\\mds_imagegrid_init', 20);
-add_action('mds_register_extensions', __NAMESPACE__ . '\\mds_imagegrid_register_extension');
+add_action('million-dollar-script/register/extensions', __NAMESPACE__ . '\\mds_imagegrid_register_extension');
 add_action('admin_notices', __NAMESPACE__ . '\\mds_imagegrid_activation_notice');
 add_action('init', function() {
     load_plugin_textdomain(

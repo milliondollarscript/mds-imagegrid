@@ -2,13 +2,13 @@
 /**
  * ImageGrid settings validation, sanitization, and numeric option helpers.
  *
- * @package MDS\Extensions\ImageGrid
+ * @package MillionDollarScript\Extensions\ImageGrid
  */
 
-namespace MDS\Extensions\ImageGrid\Concerns;
+namespace MillionDollarScript\Extensions\ImageGrid\Concerns;
 
-use MDS\Extensions\ImageGrid\API_Client;
-use function MDS\Extensions\ImageGrid\mds_imagegrid_default_api_url;
+use MillionDollarScript\Extensions\ImageGrid\API_Client;
+use function MillionDollarScript\Extensions\ImageGrid\mds_imagegrid_default_api_url;
 
 if (!defined('ABSPATH')) {
     exit;
@@ -60,6 +60,8 @@ trait ValidatesImageGridSettings {
 
         update_option('mds_imagegrid_enabled', !empty($post['mds_imagegrid_enabled']));
         update_option('mds_imagegrid_auto_render', !empty($post['mds_imagegrid_auto_render']));
+        update_option('mds_imagegrid_failure_email_enabled', !empty($post['mds_imagegrid_failure_email_enabled']), false);
+        update_option('mds_imagegrid_auto_render_preference', 'explicit', false);
         update_option('mds_imagegrid_api_url', API_Client::sanitize_service_url($post['mds_imagegrid_api_url'] ?? mds_imagegrid_default_api_url()));
         self::save_rendering_limits($post);
 
@@ -70,7 +72,7 @@ trait ValidatesImageGridSettings {
             update_option('mds_imagegrid_api_key', sanitize_text_field($submitted_key), false);
             update_option('mds_imagegrid_last_connection', [
                 'status' => 'manual_key_saved',
-                'message' => __('API key saved. Test the connection to verify the workspace.', 'mds-imagegrid'),
+                'message' => __('API key saved. Test the connection to verify the account.', 'mds-imagegrid'),
                 'checked_at' => current_time('mysql'),
             ], false);
         }
@@ -94,7 +96,7 @@ trait ValidatesImageGridSettings {
      * @return void
      */
     public static function after_mds3_settings_saved() {
-        do_action('mds_imagegrid_settings_saved');
+        \MillionDollarScript\Core\Hooks::do_compat('million-dollar-script/extensions/imagegrid/settings/saved', ['mds_imagegrid_settings_saved']);
     }
 
     /**
