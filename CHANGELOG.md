@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added opt-in uninstall cleanup through the core extension policy for extension-owned ImageGrid settings and transients.
 - Preserve the current ImageGrid plan, effective limits, quotas, usage periods, permissions, and CDN entitlement data when refreshing a hosted connection.
 - Map local safeguards only to equivalent published ImageGrid limits and leave unmatched safeguards unchanged during a plan reset.
 - Use the local ImageGrid account app during local development while keeping `imagegrid.dev` and `api.imagegrid.dev` as the production targets.

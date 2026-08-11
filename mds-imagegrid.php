@@ -167,6 +167,9 @@ function mds_imagegrid_register_extension() {
             'main_file'        => __FILE__,
             'premium'          => false,
             'license_required' => false,
+            'cleanup'          => [
+                'description' => 'ImageGrid connection, rendering state, quotas, and cached failure records.',
+            ],
             'capabilities'     => [
                 'payment_gateway' => false,
                 'admin_pages'     => true,
