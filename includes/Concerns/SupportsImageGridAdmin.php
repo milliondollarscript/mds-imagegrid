@@ -171,18 +171,31 @@ trait SupportsImageGridAdmin {
         $usage = is_array($payload['usage'] ?? null)
             ? $payload['usage']
             : (is_array($account['usage'] ?? null) ? $account['usage'] : []);
+        $quotas = is_array($payload['quotas'] ?? null)
+            ? $payload['quotas']
+            : (is_array($account['quotas'] ?? null) ? $account['quotas'] : []);
         $limit_options = self::plan_limit_options($payload);
         $metric_map = [
-            'grid_megapixels' => [__('Grid megapixels per job', 'mds-imagegrid'), 'mds_imagegrid_quota_grid_megapixels'],
-            'tile_estimate' => [__('Generated tiles per job', 'mds-imagegrid'), 'mds_imagegrid_quota_tile_estimate'],
-            'storage_estimate_bytes' => [__('Artifact bytes per job', 'mds-imagegrid'), 'mds_imagegrid_quota_storage_bytes'],
-            'processing_credits' => [__('Processing credits', 'mds-imagegrid'), 'mds_imagegrid_quota_processing_credits'],
-            'cdn_delivery_bytes' => [__('CDN delivery bytes', 'mds-imagegrid'), ''],
+            'grid_megapixels' => [__('Grid megapixels per job', 'mds-imagegrid'), 'mds_imagegrid_quota_grid_megapixels', 'max_grid_render_megapixels', 'per_job'],
+            'input_megapixels' => [__('Source megapixels per upload', 'mds-imagegrid'), '', 'max_input_megapixels', 'per_job'],
+            'input_edge_pixels' => [__('Source edge pixels per upload', 'mds-imagegrid'), '', 'max_input_edge_pixels', 'per_job'],
+            'tile_estimate' => [__('Generated tiles per job', 'mds-imagegrid'), 'mds_imagegrid_quota_tile_estimate', 'max_generated_tiles_per_job', 'per_job'],
+            'storage_estimate_bytes' => [__('Artifact bytes per job', 'mds-imagegrid'), 'mds_imagegrid_quota_storage_bytes', 'max_artifact_bytes_per_job', 'per_job'],
+            'upload_bytes' => [__('Upload bytes per source', 'mds-imagegrid'), '', 'max_upload_bytes', 'per_job'],
+            'tile_patch_megapixels' => [__('Patch megapixels per job', 'mds-imagegrid'), '', 'max_tile_patch_megapixels_per_job', 'per_job'],
+            'tile_patch_count' => [__('Patches per job', 'mds-imagegrid'), '', 'max_tile_patch_patches_per_job', 'per_job'],
+            'in_flight_jobs' => [__('Concurrent queued or running jobs', 'mds-imagegrid'), '', 'max_in_flight_jobs', 'capacity'],
+            'processing_credits' => [__('Processing credits', 'mds-imagegrid'), 'mds_imagegrid_quota_processing_credits', 'processing_credits_monthly', 'periodic'],
+            'jobs_per_day' => [__('Job submissions per day', 'mds-imagegrid'), '', 'jobs_per_day', 'periodic'],
+            'uploads_per_day' => [__('Uploads per day', 'mds-imagegrid'), '', 'uploads_per_day', 'periodic'],
+            'retention_ttl_seconds' => [__('Artifact retention seconds', 'mds-imagegrid'), '', 'retention_ttl_seconds', 'delivery'],
+            'cdn_delivery_bytes' => [__('CDN delivery bytes', 'mds-imagegrid'), '', 'cdn_delivery_bytes_monthly', 'delivery'],
         ];
         $metrics = [];
-        foreach ($metric_map as $key => [$label, $option_name]) {
+        foreach ($metric_map as $key => [$label, $option_name, $quota_key, $category]) {
             $entry = is_array($usage[$key] ?? null) ? $usage[$key] : [];
-            $limit = ('' !== $option_name ? ($limit_options[$option_name] ?? null) : null) ?? ($entry['limit'] ?? $entry['total'] ?? null);
+            $quota_limit = is_array($quotas[$quota_key] ?? null) ? ($quotas[$quota_key]['limit'] ?? null) : null;
+            $limit = ('' !== $option_name ? ($limit_options[$option_name] ?? null) : null) ?? $quota_limit ?? ($entry['limit'] ?? $entry['total'] ?? null);
             $used = $entry['used'] ?? $usage[$key . '_used'] ?? null;
             $remaining = $entry['remaining'] ?? $usage[$key . '_remaining'] ?? null;
             if (null === $remaining && is_numeric($limit) && is_numeric($used)) {
@@ -194,6 +207,7 @@ trait SupportsImageGridAdmin {
             $metrics[] = [
                 'key' => $key,
                 'label' => $label,
+                'category' => $category,
                 'limit' => is_numeric($limit) ? (float) $limit : null,
                 'used' => is_numeric($used) ? (float) $used : null,
                 'remaining' => is_numeric($remaining) ? (float) $remaining : null,

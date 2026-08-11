@@ -10,7 +10,7 @@ $format_metric = static function($value, $key) {
     if (null === $value) {
         return __('Unavailable', 'mds-imagegrid');
     }
-    if (in_array($key, ['storage_estimate_bytes', 'cdn_delivery_bytes'], true) && function_exists('size_format')) {
+    if (in_array($key, ['storage_estimate_bytes', 'upload_bytes', 'cdn_delivery_bytes'], true) && function_exists('size_format')) {
         return 0.0 === (float) $value ? __('0 B', 'mds-imagegrid') : size_format((float) $value, 1);
     }
     return number_format_i18n((float) $value, (float) $value === floor((float) $value) ? 0 : 2);
@@ -23,6 +23,19 @@ $format_date = static function($value) {
 
     return wp_date(get_option('date_format') . ' ' . get_option('time_format'), $timestamp);
 };
+$metric_groups = [
+    'per_job' => ['label' => __('Per-job limits', 'mds-imagegrid'), 'metrics' => []],
+    'capacity' => ['label' => __('Concurrent capacity', 'mds-imagegrid'), 'metrics' => []],
+    'periodic' => ['label' => __('Periodic allowance', 'mds-imagegrid'), 'metrics' => []],
+    'delivery' => ['label' => __('Storage and delivery', 'mds-imagegrid'), 'metrics' => []],
+];
+foreach ((array) ($account_summary['metrics'] ?? []) as $metric) {
+    $category = sanitize_key((string) ($metric['category'] ?? 'per_job'));
+    if (!isset($metric_groups[$category])) {
+        $category = 'per_job';
+    }
+    $metric_groups[$category]['metrics'][] = $metric;
+}
 ?>
 <section class="mds-imagegrid-panel">
     <div class="mds-imagegrid-panel-header">
@@ -69,11 +82,12 @@ $format_date = static function($value) {
                 }
                 ?>
             </dl>
-            <?php if (!empty($account_summary['metrics'])) : ?>
+            <?php foreach ($metric_groups as $metric_group) : if (empty($metric_group['metrics'])) { continue; } ?>
+                <h4><?php echo esc_html($metric_group['label']); ?></h4>
                 <div class="mds-imagegrid-usage-table-wrap"><table class="widefat striped mds-imagegrid-usage-table"><thead><tr><th><?php esc_html_e('Resource', 'mds-imagegrid'); ?></th><th><?php esc_html_e('Plan limit', 'mds-imagegrid'); ?></th><th><?php esc_html_e('Used', 'mds-imagegrid'); ?></th><th><?php esc_html_e('Remaining', 'mds-imagegrid'); ?></th></tr></thead><tbody>
-                <?php foreach ($account_summary['metrics'] as $metric) : ?><tr><th scope="row"><?php echo esc_html($metric['label']); ?></th><td><?php echo esc_html($format_metric($metric['limit'], $metric['key'])); ?></td><td><?php echo esc_html($format_metric($metric['used'], $metric['key'])); ?></td><td><?php echo esc_html($format_metric($metric['remaining'], $metric['key'])); ?></td></tr><?php endforeach; ?>
+                <?php foreach ($metric_group['metrics'] as $metric) : ?><tr><th scope="row"><?php echo esc_html($metric['label']); ?></th><td><?php echo esc_html($format_metric($metric['limit'], $metric['key'])); ?></td><td><?php echo esc_html($format_metric($metric['used'], $metric['key'])); ?></td><td><?php echo esc_html($format_metric($metric['remaining'], $metric['key'])); ?></td></tr><?php endforeach; ?>
                 </tbody></table></div>
-            <?php endif; ?>
+            <?php endforeach; ?>
         <?php else : ?>
             <div class="mds-imagegrid-empty-state mds-imagegrid-empty-state-compact"><h4><?php esc_html_e('Plan usage is unavailable here', 'mds-imagegrid'); ?></h4><p><?php esc_html_e('The connected service has not supplied plan allowance or remaining-usage data to this site. Review current usage in the ImageGrid account.', 'mds-imagegrid'); ?></p></div>
         <?php endif; ?>

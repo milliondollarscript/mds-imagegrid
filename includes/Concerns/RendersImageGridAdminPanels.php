@@ -7,6 +7,7 @@
 
 namespace MillionDollarScript\Extensions\ImageGrid\Concerns;
 
+use MillionDollarScript\Extensions\ImageGrid\API_Client;
 use MillionDollarScript\Extensions\ImageGrid\Main;
 use function MillionDollarScript\Extensions\ImageGrid\mds_imagegrid_default_api_url;
 
@@ -70,6 +71,19 @@ trait RendersImageGridAdminPanels {
         }
 
         $selected_state = $selected_grid_id ? Main::get_grid_state($selected_grid_id) : [];
+        $selected_estimate = [];
+        $selected_grid = null;
+        foreach ($grids as $candidate_grid) {
+            if (self::grid_id($candidate_grid) !== $selected_grid_id) {
+                continue;
+            }
+            $selected_grid = $candidate_grid;
+            $selected_preflight = (new API_Client($api_url))->preflight_grid_render($candidate_grid);
+            if (is_array($selected_preflight['estimate'] ?? null)) {
+                $selected_estimate = $selected_preflight['estimate'];
+            }
+            break;
+        }
         $notice = self::get_notice();
         if ($notice) {
             $notice['message'] = self::friendly_error_message((string) ($notice['message'] ?? ''));
@@ -86,6 +100,10 @@ trait RendersImageGridAdminPanels {
         );
         $render_disabled = $render_state['disabled'];
         $render_disabled_reason = $render_state['reason'];
+        if (self::grid_uses_background_image($selected_grid)) {
+            $render_disabled = true;
+            $render_disabled_reason = __('This grid uses a background image and renders locally until ImageGrid supports the same image composition settings.', 'mds-imagegrid');
+        }
         $authorization_required = $render_state['authorization_required'];
         $selected_last_error = self::friendly_error_message((string) ($selected_state['last_error'] ?? ''));
 
@@ -142,6 +160,8 @@ trait RendersImageGridAdminPanels {
         $cdn_known = !empty($last_account) && 'connected' === $connection_status;
         $cdn_access = $cdn_known && Main::has_cdn_delivery_access($last_account);
         $state = $grid_id ? Main::get_grid_state($grid_id) : [];
+        $preflight = (new API_Client())->preflight_grid_render($grid);
+        $estimate = is_array($preflight['estimate'] ?? null) ? $preflight['estimate'] : [];
         $last_error = self::friendly_error_message((string) ($state['last_error'] ?? ''));
         $notice = self::get_notice();
         if ($notice) {
@@ -160,6 +180,10 @@ trait RendersImageGridAdminPanels {
         $authorization_required = $render_state['authorization_required'];
         $render_disabled = $render_state['disabled'];
         $render_disabled_reason = $render_state['reason'];
+        if (self::grid_uses_background_image($grid)) {
+            $render_disabled = true;
+            $render_disabled_reason = __('This grid uses a background image and renders locally until ImageGrid supports the same image composition settings.', 'mds-imagegrid');
+        }
         $classes = 'mds3-settings-panel';
         if ('grid-imagegrid' === (string) $active_tab) {
             $classes .= ' is-active';
@@ -179,6 +203,17 @@ trait RendersImageGridAdminPanels {
         }
 
         return \MillionDollarScript\Core\Grids::all();
+    }
+
+    private static function grid_uses_background_image($grid) {
+        if (!$grid || !method_exists($grid, 'settings')) {
+            return false;
+        }
+
+        $settings = $grid->settings();
+        $attachment_id = absint($settings['background_image_id'] ?? 0);
+
+        return $attachment_id && wp_attachment_is_image($attachment_id);
     }
 
     /**

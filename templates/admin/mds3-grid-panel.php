@@ -48,6 +48,8 @@ $show_render_disabled_reason = !empty($render_disabled_reason) && $render_disabl
         ?>
     </div>
 
+    <?php include MDS_IMAGEGRID_PATH . 'templates/admin/partials/render-estimate.php'; ?>
+
     <dl class="mds-imagegrid-facts mds-imagegrid-grid-state">
         <?php
         self::fact(__('State', 'mds-imagegrid'), $state['status'] ?? __('None', 'mds-imagegrid'));

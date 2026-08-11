@@ -3,7 +3,7 @@ Contributors: milliondollarscript
 Requires at least: 6.0
 Tested up to: 7.0.3
 Requires PHP: 8.1
-Stable tag: 1.0.8
+Stable tag: 1.0.9
 License: GPL-3.0+
 
 Free connector that connects Million Dollar Script grids to ImageGrid for hosted rendering and entitlement-gated direct CDN tile delivery.
@@ -21,6 +21,12 @@ Million Dollar Script - ImageGrid Rendering connects Million Dollar Script zooma
 5. Test the connection, then render a grid from Million Dollar Script > Dashboard > ImageGrid or Grids > Edit Grid > ImageGrid.
 
 == Changelog ==
+
+= 1.0.9 =
+* Add idempotent, per-grid render submission coordination so transport retries cannot create duplicate jobs.
+* Show a detailed local submission estimate and separate per-job, capacity, periodic, storage, and delivery limits.
+* Keep grids with browser-composited background images on safe local rendering until the remote contract supports equivalent composition.
+* Add ImageGrid health and readiness checks to Million Dollar Script network diagnostics.
 
 = 1.0.8 =
 * Match the current ImageGrid job API by removing the obsolete remote preflight request.

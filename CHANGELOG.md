@@ -1,12 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.0.9 - 2026-08-11
 
 - Added opt-in uninstall cleanup through the core extension policy for extension-owned ImageGrid settings and transients.
 - Preserve the current ImageGrid plan, effective limits, quotas, usage periods, permissions, and CDN entitlement data when refreshing a hosted connection.
 - Map local safeguards only to equivalent published ImageGrid limits and leave unmatched safeguards unchanged during a plan reset.
 - Use the local ImageGrid account app during local development while keeping `imagegrid.dev` and `api.imagegrid.dev` as the production targets.
 - Correct the Million Dollar Script render-estimate facade call and add guidance for current worker-capacity and quota-policy errors.
+- Add idempotent, per-grid render submission coordination so ambiguous transport retries recover the original job and concurrent requests cannot create duplicates.
+- Show detailed pre-submission dimensions, tile geometry, source totals, working-size estimates, and service-compatible credit estimates.
+- Separate per-job, concurrent-capacity, periodic-allowance, storage, and delivery limits in the account view.
+- Keep grids with browser-composited background images on local rendering until the remote contract supports equivalent composition, and invalidate stale remote output when presentation changes.
+- Add ImageGrid health and readiness probes to Million Dollar Script network diagnostics without sending the saved API key.
 
 ## 1.0.8 - 2026-07-16
 

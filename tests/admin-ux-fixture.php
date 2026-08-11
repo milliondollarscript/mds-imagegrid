@@ -35,6 +35,15 @@ $fixture_response = [
     ],
     'quotas' => [
         'processing_credits_monthly' => ['limit' => 10000, 'interval_seconds' => 2592000],
+        'max_input_megapixels' => ['limit' => 48],
+        'max_input_edge_pixels' => ['limit' => 8000],
+        'max_upload_bytes' => ['limit' => 52428800],
+        'max_tile_patch_megapixels_per_job' => ['limit' => 4],
+        'max_tile_patch_patches_per_job' => ['limit' => 1],
+        'max_in_flight_jobs' => ['limit' => 25],
+        'jobs_per_day' => ['limit' => 10000, 'interval_seconds' => 86400],
+        'retention_ttl_seconds' => ['limit' => 86400],
+        'cdn_delivery_bytes_monthly' => ['limit' => 100000000000, 'interval_seconds' => 2592000],
     ],
     'usage' => [
         'processing_credits' => [
@@ -67,10 +76,17 @@ if (10000.0 !== ($limits['mds_imagegrid_quota_processing_credits'] ?? null)) {
 }
 
 $summary = $invoke_private('account_summary', [$fixture_account, $connection]);
+$metrics_by_key = [];
+foreach ($summary['metrics'] as $metric) {
+    $metrics_by_key[$metric['key']] = $metric;
+}
 if (
     'Growth' !== ($summary['plan_name'] ?? '')
     || '2026-08-01T00:00:00Z' !== ($summary['period_end'] ?? '')
-    || count($summary['metrics']) < 5
+    || 48.0 !== ($metrics_by_key['input_megapixels']['limit'] ?? null)
+    || 'capacity' !== ($metrics_by_key['in_flight_jobs']['category'] ?? '')
+    || 'periodic' !== ($metrics_by_key['jobs_per_day']['category'] ?? '')
+    || 'delivery' !== ($metrics_by_key['cdn_delivery_bytes']['category'] ?? '')
     || empty($summary['limits_available'])
 ) {
     throw new RuntimeException('Plan and usage summary did not preserve authoritative fixture data.');

@@ -6,6 +6,8 @@ Free Million Dollar Script connector for the paid hosted ImageGrid service.
 
 - Connects Million Dollar Script to a separately subscribed ImageGrid account with an API key.
 - Submits ImageGrid `grid_render` jobs for zoomable grids.
+- Uses idempotent job submissions so an ambiguous transport retry resolves to the original remote job instead of creating a duplicate.
+- Shows dimensions, Deep Zoom levels, tile counts, source totals, working-size estimates, and service-compatible credit estimates before submission.
 - Uses the current ImageGrid standard Deep Zoom level geometry for correctly scaled edge tiles on large grids.
 - Stores remote job and tileset state per grid without changing existing grid records.
 - Loads signed, versioned public tile templates directly from ImageGrid when the connected account has CDN Delivery access.
@@ -44,4 +46,4 @@ The connector records a local submission estimate and relies on the current `POS
 
 ## Release Notes
 
-Version 1.0.8 is the current connector for Million Dollar Script 3.0. It supports hosted account connection, compatibility-safe automatic-rendering defaults, tabbed administration, manual API credentials, remote render submission, deferred placement asset patching, entitlement-gated direct CDN tile delivery, standard Deep Zoom geometry, local rendering fallback, redirect-safe authenticated transport, and actionable paid-access status handling. Render failures create persistent, dismissible WordPress notices; an administrator can also opt in to one deduplicated `wp_mail()` notification per unresolved failure.
+Version 1.0.9 is the current connector for Million Dollar Script 3.0. It supports hosted account connection, compatibility-safe automatic-rendering defaults, tabbed administration, manual API credentials, idempotent remote render submission, detailed submission estimates, deferred placement asset patching, entitlement-gated direct CDN tile delivery, standard Deep Zoom geometry, local rendering fallback, redirect-safe authenticated transport, and actionable paid-access status handling. Render failures create persistent, dismissible WordPress notices; an administrator can also opt in to one deduplicated `wp_mail()` notification per unresolved failure.

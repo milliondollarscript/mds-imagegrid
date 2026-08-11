@@ -80,12 +80,42 @@ class Main {
         add_filter('million-dollar-script/imagegrid/local/render/threshold/megapixels', [$this, 'filter_mds3_local_render_threshold']);
         add_filter('million-dollar-script/imagegrid/submit/render', [$this, 'submit_mds3_render'], 10, 3);
         add_filter('million-dollar-script/imagegrid/poll/render', [$this, 'poll_mds3_render'], 10, 2);
+        add_action('million-dollar-script/admin/grid/saved', [$this, 'grid_saved'], 10, 4);
         add_filter('mds_image_processor_generate_tiles_for_grid', [$this, 'maybe_start_remote_generation'], 10, 3);
         add_filter('million-dollar-script/extensions/imagegrid/client', [$this, 'filter_client']);
         add_filter('million-dollar-script/grid/remote/tile/request', [$this, 'remote_tile_request'], 10, 5);
         add_filter('million-dollar-script/grid/has/remote/tiles', [$this, 'grid_has_remote_tiles'], 10, 2);
         add_filter('million-dollar-script/grid/remote/tile/metadata', [$this, 'remote_tile_metadata'], 10, 3);
         add_filter('million-dollar-script/extension/onboarding/items', [$this, 'extension_onboarding_items']);
+        add_filter('million-dollar-script/network/diagnostic/endpoints', [$this, 'network_diagnostic_endpoints']);
+    }
+
+    /**
+     * Add ImageGrid health and readiness to core's on-demand diagnostics.
+     *
+     * @param array $endpoints Existing endpoints.
+     * @return array
+     */
+    public function network_diagnostic_endpoints(array $endpoints) {
+        $base_url = untrailingslashit((string) (new API_Client())->get_api_url());
+        if (!$base_url || !API_Client::is_allowed_url($base_url)) {
+            return $endpoints;
+        }
+
+        $endpoints[] = [
+            'id' => 'imagegrid-health',
+            'label' => __('ImageGrid health', 'mds-imagegrid'),
+            'url' => $base_url . '/healthz',
+            'allow_private' => true,
+        ];
+        $endpoints[] = [
+            'id' => 'imagegrid-readiness',
+            'label' => __('ImageGrid readiness', 'mds-imagegrid'),
+            'url' => $base_url . '/readyz',
+            'allow_private' => true,
+        ];
+
+        return $endpoints;
     }
 
     /**
@@ -474,11 +504,15 @@ class Main {
             return $result;
         }
 
+        if (self::grid_has_background_image($grid)) {
+            return $result;
+        }
+
         $existing = self::get_grid_state($grid_id);
-        if (!empty($existing['job_id']) && in_array($existing['status'] ?? '', ['queued', 'running', 'pending', 'rendering'], true)) {
+        if ((!empty($existing['job_id']) || !empty($existing['submission_key'])) && in_array($existing['status'] ?? '', ['submitting', 'queued', 'running', 'pending', 'rendering'], true)) {
             return [
                 'status' => 'remote_in_progress',
-                'job_id' => $existing['job_id'],
+                'job_id' => $existing['job_id'] ?? '',
             ];
         }
 
@@ -505,7 +539,7 @@ class Main {
      * @return mixed
      */
     public function remote_tile_request($request, $grid_id, $z, $x, $y) {
-        if (null !== $request || !self::can_serve_remote_tiles()) {
+        if (null !== $request || !self::can_serve_remote_tiles() || self::grid_has_background_image(self::get_grid($grid_id))) {
             return $request;
         }
 
@@ -533,6 +567,10 @@ class Main {
      * @return bool
      */
     public function grid_has_remote_tiles($has_remote, $grid_id) {
+        if (self::grid_has_background_image(self::get_grid($grid_id))) {
+            return false;
+        }
+
         if ($has_remote || !self::can_serve_remote_tiles()) {
             return (bool) $has_remote;
         }
@@ -599,6 +637,32 @@ class Main {
             return $result;
         }
 
+        $grid_id = absint($manifest['grid']['id'] ?? 0);
+        $lock = SubmissionCoordinator::acquire($grid_id);
+        if (is_wp_error($lock)) {
+            return $lock;
+        }
+
+        try {
+            return $this->submit_mds3_render_locked($result, $manifest, $preflight);
+        } finally {
+            SubmissionCoordinator::release($grid_id, $lock);
+        }
+    }
+
+    /**
+     * Submit an MDS3 render while the per-grid submission lock is held.
+     *
+     * @param mixed $result Existing filter result.
+     * @param array $manifest MDS3 manifest.
+     * @param array $preflight Core preflight data.
+     * @return mixed
+     */
+    private function submit_mds3_render_locked($result, array $manifest, array $preflight) {
+        if (null !== $result || !self::is_enabled()) {
+            return $result;
+        }
+
         $client = $this->client();
         $ready = $client->ready();
         if (is_wp_error($ready)) {
@@ -612,19 +676,31 @@ class Main {
             return $ready;
         }
 
-        $response = $client->create_manifest_render_job($manifest, $preflight);
+        $grid_id = absint($manifest['grid']['id'] ?? 0);
+        $submission = SubmissionCoordinator::context($grid_id, self::get_grid_state($grid_id));
+        self::update_grid_state($grid_id, [
+            'status' => 'submitting',
+            'submission_key' => $submission['key'],
+            'submission_generation' => $submission['generation'],
+            'submission_retryable' => false,
+            'updated_at' => current_time('mysql'),
+        ]);
+
+        $response = $client->create_manifest_render_job($manifest, $preflight, $submission['key']);
         if (is_wp_error($response)) {
-            $grid_id = absint($manifest['grid']['id'] ?? 0);
+            $retryable = SubmissionCoordinator::transport_error_is_ambiguous($response);
             self::update_grid_state($grid_id, [
                 'status' => 'failed',
                 'last_error' => $response->get_error_message(),
                 'failure_code' => $response->get_error_code(),
+                'submission_key' => $retryable ? $submission['key'] : '',
+                'submission_generation' => $retryable ? $submission['generation'] : '',
+                'submission_retryable' => $retryable,
                 'updated_at' => current_time('mysql'),
             ]);
             return $response;
         }
 
-        $grid_id = absint($manifest['grid']['id'] ?? 0);
         $job_id = sanitize_text_field((string) ($response['id'] ?? $response['job_id'] ?? ''));
         $result_payload = is_array($response['result'] ?? null) ? $response['result'] : [];
         $tileset_id = sanitize_text_field((string) ($result_payload['tileset_id'] ?? $response['tileset_id'] ?? ''));
@@ -646,6 +722,10 @@ class Main {
                 'patch_queue_prepared' => false,
                 'patch_complete' => false,
                 'preflight' => $preflight,
+                'render_generation' => $submission['generation'],
+                'submission_key' => '',
+                'submission_generation' => '',
+                'submission_retryable' => false,
                 'submitted_at' => current_time('mysql'),
                 'updated_at' => current_time('mysql'),
                 'last_error' => $last_error,
@@ -871,7 +951,12 @@ class Main {
         }
 
         $patch = array_shift($queue);
-        $response = $this->client()->create_tile_patch_job($tileset_id, [$patch]);
+        $patch_key = SubmissionCoordinator::patch_key(
+            (string) ($state['render_generation'] ?? $state['submission_generation'] ?? ''),
+            $tileset_id,
+            $patch
+        );
+        $response = $this->client()->create_tile_patch_job($tileset_id, [$patch], $patch_key);
         if (is_wp_error($response)) {
             $message = $response->get_error_message();
             self::update_grid_state($grid_id, [
@@ -922,6 +1007,26 @@ class Main {
      */
     public static function submit_grid_render($grid_id, $grid = null) {
         $grid_id = absint($grid_id);
+        $lock = SubmissionCoordinator::acquire($grid_id);
+        if (is_wp_error($lock)) {
+            return $lock;
+        }
+
+        try {
+            return self::submit_grid_render_locked($grid_id, $grid);
+        } finally {
+            SubmissionCoordinator::release($grid_id, $lock);
+        }
+    }
+
+    /**
+     * Submit a grid render while the per-grid submission lock is held.
+     *
+     * @param int $grid_id Grid ID.
+     * @param \MillionDollarScript\Core\Grid|null $grid Optional grid object.
+     * @return array|\WP_Error
+     */
+    private static function submit_grid_render_locked($grid_id, $grid = null) {
 
         if (!$grid) {
             $grid = self::get_grid($grid_id);
@@ -929,6 +1034,13 @@ class Main {
 
         if (!$grid) {
             return new \WP_Error('mds_imagegrid_grid_not_found', __('Grid not found.', 'mds-imagegrid'));
+        }
+
+        if (self::grid_has_background_image($grid)) {
+            return new \WP_Error(
+                'mds_imagegrid_background_local_only',
+                __('This grid uses a background image and will render locally until ImageGrid supports background-image composition.', 'mds-imagegrid')
+            );
         }
 
         $client = self::instance()->client();
@@ -963,13 +1075,26 @@ class Main {
             return new \WP_Error('mds_imagegrid_preflight_failed', $message, $preflight);
         }
 
-        $response = $client->create_grid_render_job($grid);
+        $submission = SubmissionCoordinator::context($grid_id, self::get_grid_state($grid_id));
+        self::update_grid_state($grid_id, [
+            'status' => 'submitting',
+            'submission_key' => $submission['key'],
+            'submission_generation' => $submission['generation'],
+            'submission_retryable' => false,
+            'updated_at' => current_time('mysql'),
+        ]);
+
+        $response = $client->create_grid_render_job($grid, [], $submission['key']);
 
         if (is_wp_error($response)) {
+            $retryable = SubmissionCoordinator::transport_error_is_ambiguous($response);
             self::update_grid_state($grid_id, [
                 'status' => 'failed',
                 'last_error' => $response->get_error_message(),
                 'failure_code' => $response->get_error_code(),
+                'submission_key' => $retryable ? $submission['key'] : '',
+                'submission_generation' => $retryable ? $submission['generation'] : '',
+                'submission_retryable' => $retryable,
                 'updated_at' => current_time('mysql'),
             ]);
             return $response;
@@ -987,6 +1112,10 @@ class Main {
             'tileset_id' => '',
             'format'     => 'png',
             'preflight'  => $preflight,
+            'render_generation' => $submission['generation'],
+            'submission_key' => '',
+            'submission_generation' => '',
+            'submission_retryable' => false,
             'submitted_at' => current_time('mysql'),
             'updated_at' => current_time('mysql'),
             'last_error' => $last_error,
@@ -1177,6 +1306,39 @@ class Main {
         if (array_key_exists('last_error', $state) && in_array(sanitize_key((string) ($updated['status'] ?? '')), ['pending', 'queued', 'running', 'rendering', 'ready'], true)) {
             Render_Failure_Notifier::resolve_grid($grid_id);
         }
+    }
+
+    /**
+     * Invalidate hosted output when a grid background presentation changes.
+     *
+     * @param object $updated  Updated grid.
+     * @param array  $data     Submitted grid data.
+     * @param object $previous Previous grid.
+     * @param string $context  Save context.
+     * @return void
+     */
+    public function grid_saved($updated, array $data, $previous, $context) {
+        unset($data, $context);
+        if (!$updated || !method_exists($updated, 'id')) {
+            return;
+        }
+
+        $before = self::grid_background_fingerprint($previous);
+        $after = self::grid_background_fingerprint($updated);
+        if ($before === $after) {
+            return;
+        }
+
+        self::update_grid_state($updated->id(), [
+            'status' => 'stale',
+            'tileset_id' => '',
+            'base_tileset_id' => '',
+            'patch_job_id' => '',
+            'patch_queue' => [],
+            'patch_complete' => false,
+            'last_error' => '',
+            'updated_at' => current_time('mysql'),
+        ]);
     }
 
     /**
@@ -1395,6 +1557,43 @@ class Main {
      */
     private static function can_serve_remote_tiles() {
         return self::is_enabled() && self::has_cdn_delivery_access();
+    }
+
+    /**
+     * Whether a grid requires browser-local background composition.
+     *
+     * @param object|null $grid Grid value object.
+     * @return bool
+     */
+    private static function grid_has_background_image($grid) {
+        if (!$grid || !method_exists($grid, 'settings')) {
+            return false;
+        }
+
+        $settings = $grid->settings();
+        $attachment_id = absint($settings['background_image_id'] ?? 0);
+
+        return $attachment_id && wp_attachment_is_image($attachment_id);
+    }
+
+    /**
+     * Stable presentation fingerprint used to invalidate remote tiles.
+     *
+     * @param object|null $grid Grid value object.
+     * @return string
+     */
+    private static function grid_background_fingerprint($grid) {
+        if (!$grid || !method_exists($grid, 'settings')) {
+            return '';
+        }
+
+        $settings = $grid->settings();
+        $values = [];
+        foreach (['background_color', 'background_image_id', 'background_image_fit', 'background_image_position', 'background_image_repeat', 'background_image_opacity'] as $key) {
+            $values[$key] = $settings[$key] ?? '';
+        }
+
+        return sha1((string) wp_json_encode($values));
     }
 
     /**

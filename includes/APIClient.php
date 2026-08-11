@@ -127,6 +127,8 @@ class API_Client {
      */
     public function preflight_grid_render($grid, array $options = []) {
         $render_options = $this->build_grid_render_options($grid, $options);
+        $grid_data = $this->grid_data($grid);
+        $render_options['placements'] = $this->build_grid_placements(absint($grid_data['id'] ?? 0));
 
         return [
             'ok' => true,
@@ -141,16 +143,17 @@ class API_Client {
      *
      * @param \MillionDollarScript\Core\Grid $grid Grid object.
      * @param array          $options Additional ImageGrid options.
+     * @param string         $idempotency_key Stable key for safe transport retries.
      * @return array|\WP_Error
      */
-    public function create_grid_render_job($grid, array $options = []) {
+    public function create_grid_render_job($grid, array $options = [], $idempotency_key = '') {
         $render_options = $this->build_grid_render_options($grid, $options);
         $payload = [
             'operation' => 'grid_render',
             'options'   => $render_options,
         ];
 
-        return $this->request_json('POST', '/v1/jobs', $payload);
+        return $this->request_json('POST', '/v1/jobs', $payload, true, $idempotency_key);
     }
 
     /**
@@ -158,9 +161,10 @@ class API_Client {
      *
      * @param array $manifest  MDS3 render manifest.
      * @param array $preflight MDS3 preflight data.
+     * @param string $idempotency_key Stable key for safe transport retries.
      * @return array|\WP_Error
      */
-    public function create_manifest_render_job(array $manifest, array $preflight = []) {
+    public function create_manifest_render_job(array $manifest, array $preflight = [], $idempotency_key = '') {
         $grid = is_array($manifest['grid'] ?? null) ? $manifest['grid'] : [];
         $options = [
             'width' => max(1, absint($grid['width'] ?? 0)),
@@ -183,7 +187,7 @@ class API_Client {
             'options' => $options,
         ];
 
-        return $this->request_json('POST', '/v1/jobs', $payload);
+        return $this->request_json('POST', '/v1/jobs', $payload, true, $idempotency_key);
     }
 
     /**
@@ -218,9 +222,10 @@ class API_Client {
      *
      * @param string $tileset_id Existing ImageGrid tileset UUID.
      * @param array  $patches    Prepared tile_patch entries.
+     * @param string $idempotency_key Stable key for safe transport retries.
      * @return array|\WP_Error
      */
-    public function create_tile_patch_job($tileset_id, array $patches) {
+    public function create_tile_patch_job($tileset_id, array $patches, $idempotency_key = '') {
         $tileset_id = sanitize_text_field((string) $tileset_id);
         if (!$this->looks_like_uuid($tileset_id)) {
             return new \WP_Error('mds_imagegrid_invalid_tileset_id', __('Invalid ImageGrid tileset ID.', 'mds-imagegrid'));
@@ -243,7 +248,7 @@ class API_Client {
                 'tileset_id' => $tileset_id,
                 'patches' => $prepared,
             ],
-        ]);
+        ], true, $idempotency_key);
     }
 
     /**
@@ -311,9 +316,10 @@ class API_Client {
      * @param string $path          Request path.
      * @param array  $payload       Request body/query.
      * @param bool   $requires_auth Whether API key auth is required.
+     * @param string $idempotency_key Optional validated job-submission key.
      * @return array|\WP_Error
      */
-    public function request_json($method, $path, array $payload = [], $requires_auth = true) {
+    public function request_json($method, $path, array $payload = [], $requires_auth = true, $idempotency_key = '') {
         $method = strtoupper((string) $method);
         $url = $this->build_url($path);
 
@@ -342,6 +348,11 @@ class API_Client {
             $args['headers'] = array_merge($args['headers'], $this->auth_headers());
         }
 
+        $idempotency_headers = $this->idempotency_headers($idempotency_key);
+        if (is_wp_error($idempotency_headers)) {
+            return $idempotency_headers;
+        }
+        $args['headers'] = array_merge($args['headers'], $idempotency_headers);
         $args['headers'] = array_merge($args['headers'], $this->host_header());
 
         if ('GET' === $method && !empty($payload)) {
@@ -389,6 +400,27 @@ class API_Client {
         }
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Build a validated idempotency header for a job submission.
+     *
+     * @param string $key Candidate key.
+     * @return array|\WP_Error
+     */
+    private function idempotency_headers($key) {
+        $key = trim((string) $key);
+        if ('' === $key) {
+            return [];
+        }
+        if (strlen($key) < 8 || strlen($key) > 128 || !preg_match('/\A[A-Za-z0-9._:-]+\z/', $key)) {
+            return new \WP_Error(
+                'mds_imagegrid_invalid_idempotency_key',
+                __('ImageGrid could not submit the job because its retry key was invalid.', 'mds-imagegrid')
+            );
+        }
+
+        return ['Idempotency-Key' => $key];
     }
 
     /**
@@ -490,11 +522,26 @@ class API_Client {
         }
 
         return [
+            'width' => max(1, absint($grid_data['width'])),
+            'height' => max(1, absint($grid_data['height'])),
             'grid_megapixels' => round((max(1, absint($grid_data['width'])) * max(1, absint($grid_data['height']))) / 1000000, 4),
+            'source_image_count' => count($source_images),
             'source_megapixels' => 0,
+            'largest_source_megapixels' => 0,
+            'largest_source_edge_pixels' => 0,
+            'tile_size' => max(64, absint($options['tile_size'] ?? 256)),
+            'min_level' => 0,
+            'max_level' => max(0, absint($options['max_level'] ?? 0)),
+            'tile_level_count' => max(0, absint($options['max_level'] ?? 0)) + 1,
+            'tile_levels' => [],
             'tile_estimate' => 0,
+            'uncompressed_canvas_bytes' => max(1, absint($grid_data['width'])) * max(1, absint($grid_data['height'])) * 4,
+            'uncompressed_pyramid_bytes' => 0,
             'storage_estimate_bytes' => 0,
-            'processing_credits' => 1,
+            'processing_credits' => max(10, (int) ceil((max(1, absint($grid_data['width'])) * max(1, absint($grid_data['height']))) / 1000000 * 3)),
+            'estimated_patch_jobs' => count($source_images),
+            'estimated_patch_processing_credits' => count($source_images) * 5,
+            'estimated_workflow_processing_credits' => max(10, (int) ceil((max(1, absint($grid_data['width'])) * max(1, absint($grid_data['height']))) / 1000000 * 3)) + (count($source_images) * 5),
         ];
     }
 

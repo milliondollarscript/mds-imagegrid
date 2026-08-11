@@ -3,7 +3,7 @@
  * Plugin Name: Million Dollar Script - ImageGrid Rendering
  * Plugin URI: https://milliondollarscript.com/extensions/imagegrid
  * Description: Free connector for rendering Million Dollar Script grids with the paid ImageGrid service.
- * Version: 1.0.8
+ * Version: 1.0.9
  * Author: Million Dollar Script
  * Author URI: https://milliondollarscript.com
  * Text Domain: mds-imagegrid
@@ -36,7 +36,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('MDS_IMAGEGRID_VERSION')) {
-    define('MDS_IMAGEGRID_VERSION', '1.0.8');
+    define('MDS_IMAGEGRID_VERSION', '1.0.9');
 }
 
 if (!defined('MDS_IMAGEGRID_FILE')) {
