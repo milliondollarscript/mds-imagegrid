@@ -59,7 +59,17 @@ trait HandlesImageGridAdminActions {
         }
 
         if (in_array($section, ['all', 'rendering'], true)) {
-            update_option('mds_imagegrid_enabled', isset($_POST['mds_imagegrid_enabled']));
+            $wants_enabled = isset($_POST['mds_imagegrid_enabled']);
+            // Switching ImageGrid on without a key used to report "settings saved" while the panel
+            // still read "Not connected", so the tick looked like it worked and did nothing. A key
+            // typed in this same submission counts: the connection section saves first.
+            $has_key = '' !== (string) get_option('mds_imagegrid_api_key', '')
+                || '' !== trim((string) ($_POST['mds_imagegrid_api_key'] ?? ''));
+            if ($wants_enabled && !$has_key) {
+                self::redirect_with_notice('error', __('ImageGrid needs an API key before it can be switched on.', 'mds-imagegrid'));
+            }
+
+            update_option('mds_imagegrid_enabled', $wants_enabled);
             update_option('mds_imagegrid_auto_render', isset($_POST['mds_imagegrid_auto_render']));
             update_option('mds_imagegrid_failure_email_enabled', isset($_POST['mds_imagegrid_failure_email_enabled']), false);
             update_option('mds_imagegrid_auto_render_preference', 'explicit', false);

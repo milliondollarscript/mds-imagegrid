@@ -40,6 +40,23 @@ trait ValidatesImageGridSettings {
             $errors->add('mds_imagegrid_invalid_api_url', __('Enter a valid ImageGrid service URL.', 'mds-imagegrid'));
         }
 
+        // Switching ImageGrid on without a key used to report "Settings saved." while the panel
+        // still read "Not connected", so the tick appeared to work and did nothing. Say what is
+        // missing instead, and keep the setting off.
+        if (!empty($post['mds_imagegrid_enabled']) && !empty($post['mds_imagegrid_clear_api_key'])) {
+            $errors->add('mds_imagegrid_missing_api_key', __('ImageGrid needs an API key before it can be switched on.', 'mds-imagegrid'));
+
+            return $errors;
+        }
+
+        if (!empty($post['mds_imagegrid_enabled'])) {
+            $submitted_key = trim((string) ($post['mds_imagegrid_api_key'] ?? ''));
+            $stored_key = (string) get_option('mds_imagegrid_api_key', '');
+            if ('' === $submitted_key && '' === $stored_key) {
+                $errors->add('mds_imagegrid_missing_api_key', __('ImageGrid needs an API key before it can be switched on.', 'mds-imagegrid'));
+            }
+        }
+
         return $errors;
     }
 
