@@ -2,7 +2,7 @@
   "schema": 1,
   "package": "mds-imagegrid",
   "type": "extension",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "channel": "main",
   "title": "ImageGrid Rendering",
   "docs": [

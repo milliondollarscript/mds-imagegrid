@@ -3,7 +3,7 @@ Contributors: milliondollarscript
 Requires at least: 6.0
 Tested up to: 7.1.3
 Requires PHP: 8.1
-Stable tag: 1.0.10
+Stable tag: 1.0.11
 License: GPL-3.0+
 
 Free connector that connects Million Dollar Script grids to ImageGrid for hosted rendering and entitlement-gated direct CDN tile delivery.
@@ -21,6 +21,9 @@ Million Dollar Script - ImageGrid Rendering connects Million Dollar Script zooma
 5. Test the connection, then render a grid from Million Dollar Script > Dashboard > ImageGrid or Grids > Edit Grid > ImageGrid.
 
 == Changelog ==
+
+= 1.0.11 =
+* Corrected the version the plugin reports, so its listings, its assets, and its built-in documentation all name the installed build.
 
 = 1.0.10 =
 * Turning hosted rendering on without a service key now says what is missing.
