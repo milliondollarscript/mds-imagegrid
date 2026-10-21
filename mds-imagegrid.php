@@ -36,7 +36,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('MDS_IMAGEGRID_VERSION')) {
-    define('MDS_IMAGEGRID_VERSION', '1.0.9');
+    define('MDS_IMAGEGRID_VERSION', '1.0.10');
 }
 
 if (!defined('MDS_IMAGEGRID_FILE')) {
